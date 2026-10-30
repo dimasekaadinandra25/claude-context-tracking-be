@@ -202,18 +202,52 @@ func TestSessionsListIncludesAllModels(t *testing.T) {
 	}
 	want := map[string][]string{
 		"mixed": {"claude-opus-5-5", "claude-sonnet-5-5"},
-		"bare":  {"claude-opus-5-5"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("models = %v, want %v", got, want)
 	}
 
-	detail, err := svc.Session(ctx, caller, "mixed")
+	for id, models := range map[string][]string{
+		"mixed": want["mixed"],
+		"bare":  {"claude-opus-5-5"},
+	} {
+		detail, err := svc.Session(ctx, caller, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(detail.Models, models) {
+			t.Fatalf("%s detail models = %v, want %v", id, detail.Models, models)
+		}
+	}
+}
+
+func TestSessionsListShowsGrowthInRange(t *testing.T) {
+	pool := testdb.Open(t)
+	ctx := context.Background()
+	a := testdb.User(t, pool, "a@test.local", false)
+	svc := New(repository.New(pool))
+	spans := withHours("spans",
+		dto.HourPayload{Hour: at("2026-10-20T03:00:00Z"), Model: "claude-opus-5-5", NewContext: 7000, Requests: 7},
+		dto.HourPayload{Hour: at("2026-10-30T03:00:00Z"), Model: "claude-opus-5-5", NewContext: 5000, Requests: 5})
+	idle := withHours("idle",
+		dto.HourPayload{Hour: at("2026-10-20T03:00:00Z"), Model: "claude-opus-5-5", NewContext: 9000, Requests: 9})
+	idle.LatestAt = at("2026-10-30T05:00:00Z")
+	ingest(t, svc, a, spans, idle)
+
+	rows, total, err := svc.Sessions(ctx, dto.Caller{UserID: a}, dto.SessionQuery{ReportQuery: week()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(detail.Models, want["mixed"]) {
-		t.Fatalf("detail models = %v, want %v", detail.Models, want["mixed"])
+	if total != 1 || len(rows) != 1 || rows[0].ID != "spans" || rows[0].NewContext != 5000 {
+		t.Fatalf("total=%d rows=%+v, want only spans with 5000 in range", total, rows)
+	}
+
+	detail, err := svc.Session(ctx, dto.Caller{UserID: a}, "spans")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Session.NewContext != 12000 {
+		t.Fatalf("detail new_context = %d, want lifetime 12000", detail.Session.NewContext)
 	}
 }
 

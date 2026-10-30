@@ -338,7 +338,7 @@ GET /usage/v1/models?from=...&to=...
 
 ### 5. Session List
 
-Paged `usage.sessions` rows with the owner's name.
+Paged `usage.sessions` rows with the owner's name. Only sessions that grew inside the range are listed.
 
 ```
 GET /usage/v1/sessions?from=...&to=...&project=&model=&q=&page=1&per_page=25&sort=-last_request_at
@@ -387,7 +387,7 @@ GET /usage/v1/sessions?from=...&to=...&project=&model=&q=&page=1&per_page=25&sor
 }
 ```
 
-`new_context` and `requests` here are the session's lifetime values as sent by the app, not range sums.
+`new_context` here is the session's growth inside the range (sum of its hour rows with `hour` in `[from, to)`), and sorting by `new_context` uses that value. Sessions with no growth in the range are left out. `requests` and the context fields are the session's lifetime values. `GET /usage/v1/sessions/:id` returns the lifetime `new_context`.
 
 `model` is the session's current model. `models` lists every model the session used: the distinct models of its hour rows, ordered by their summed `new_context` (largest first), then by name. A session with no hour rows gets `[model]`.
 

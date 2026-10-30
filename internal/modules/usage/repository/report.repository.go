@@ -21,8 +21,8 @@ var groupColumns = map[string]string{
 var sessionOrders = map[string]string{
 	"last_request_at":  "s.last_request_at ASC, s.id",
 	"-last_request_at": "s.last_request_at DESC, s.id",
-	"new_context":      "s.new_context ASC, s.id",
-	"-new_context":     "s.new_context DESC, s.id",
+	"new_context":      "g.new_context ASC, s.id",
+	"-new_context":     "g.new_context DESC, s.id",
 }
 
 func ValidGroup(groupBy string) bool {
@@ -42,9 +42,10 @@ func userFilter(userID string) any {
 	return userID
 }
 
-const sessionColumns = `
+func sessionColumns(newContext string) string {
+	return `
 	s.id, s.user_id::text, s.machine, s.project, s.title, s.model,
-	s.context_window, s.start_context, s.latest_context, s.peak_context, s.new_context,
+	s.context_window, s.start_context, s.latest_context, s.peak_context, ` + newContext + `,
 	s.requests, s.compactions, s.first_request_at, s.last_request_at, s.last_reported_at,
 	COALESCE(NULLIF(u.full_name, ''), u.username),
 	COALESCE((
@@ -54,6 +55,7 @@ const sessionColumns = `
 			FROM usage.session_hours WHERE session_id = s.id GROUP BY model
 		) m
 	), ARRAY[s.model]::text[])`
+}
 
 func scanSession(row pgx.Row) (dto.SessionRow, error) {
 	var r dto.SessionRow
@@ -145,8 +147,12 @@ func (r *Repository) Sessions(ctx context.Context, q dto.SessionQuery, limit, of
 	where := `
 		FROM usage.sessions s
 		JOIN core.users u ON u.id = s.user_id
-		WHERE s.last_request_at >= $1 AND s.last_request_at < $2
-		  AND ($3::uuid IS NULL OR s.user_id = $3::uuid)
+		JOIN LATERAL (
+			SELECT SUM(h.new_context) AS new_context
+			FROM usage.session_hours h
+			WHERE h.session_id = s.id AND h.hour >= $1 AND h.hour < $2
+		) g ON g.new_context > 0
+		WHERE ($3::uuid IS NULL OR s.user_id = $3::uuid)
 		  AND ($4 = '' OR s.project = $4)
 		  AND ($5 = '' OR s.model = $5 OR EXISTS (
 			SELECT 1 FROM usage.session_hours h WHERE h.session_id = s.id AND h.model = $5))
@@ -158,7 +164,7 @@ func (r *Repository) Sessions(ctx context.Context, q dto.SessionQuery, limit, of
 		return nil, 0, err
 	}
 	rows, err := r.db.Query(ctx,
-		`SELECT `+sessionColumns+where+` ORDER BY `+sessionOrders[q.Sort]+` LIMIT $7 OFFSET $8`,
+		`SELECT `+sessionColumns("g.new_context")+where+` ORDER BY `+sessionOrders[q.Sort]+` LIMIT $7 OFFSET $8`,
 		append(args, limit, offset)...)
 	if err != nil {
 		return nil, 0, err
@@ -171,7 +177,7 @@ func (r *Repository) Sessions(ctx context.Context, q dto.SessionQuery, limit, of
 
 func (r *Repository) Session(ctx context.Context, id string) (dto.SessionDetail, error) {
 	found, err := scanSession(r.db.QueryRow(ctx, `
-		SELECT `+sessionColumns+`
+		SELECT `+sessionColumns("s.new_context")+`
 		FROM usage.sessions s
 		JOIN core.users u ON u.id = s.user_id
 		WHERE s.id = $1`, id))
