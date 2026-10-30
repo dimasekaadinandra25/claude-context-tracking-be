@@ -1,0 +1,3 @@
+DROP FUNCTION IF EXISTS core.has_permission(JSONB, VARCHAR, VARCHAR);
+DROP TABLE IF EXISTS core.user_roles;
+DROP TABLE IF EXISTS core.roles;
