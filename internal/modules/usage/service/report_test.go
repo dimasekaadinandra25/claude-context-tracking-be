@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -178,5 +179,58 @@ func TestOverviewTotals(t *testing.T) {
 	}
 	if got[a] != 48000 || got[b] != 5000 {
 		t.Fatalf("per person = %v, want A 48000 and B 5000", got)
+	}
+}
+
+func TestSessionsListIncludesAllModels(t *testing.T) {
+	pool := testdb.Open(t)
+	ctx := context.Background()
+	a := testdb.User(t, pool, "a@test.local", false)
+	svc := New(repository.New(pool))
+	bare := payload("bare")
+	bare.Hours = nil
+	ingest(t, svc, a, payload("mixed"), bare)
+	caller := dto.Caller{UserID: a}
+
+	rows, _, err := svc.Sessions(ctx, caller, dto.SessionQuery{ReportQuery: week()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string][]string{}
+	for _, r := range rows {
+		got[r.ID] = r.Models
+	}
+	want := map[string][]string{
+		"mixed": {"claude-opus-5-5", "claude-sonnet-5-5"},
+		"bare":  {"claude-opus-5-5"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("models = %v, want %v", got, want)
+	}
+
+	detail, err := svc.Session(ctx, caller, "mixed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(detail.Models, want["mixed"]) {
+		t.Fatalf("detail models = %v, want %v", detail.Models, want["mixed"])
+	}
+}
+
+func TestSessionsFilterMatchesAnyModel(t *testing.T) {
+	pool := testdb.Open(t)
+	ctx := context.Background()
+	a := testdb.User(t, pool, "a@test.local", false)
+	svc := New(repository.New(pool))
+	ingest(t, svc, a, payload("mixed"),
+		withHours("opus-only", dto.HourPayload{Hour: at("2026-10-30T03:00:00Z"), Model: "claude-opus-5-5", NewContext: 5000, Requests: 5}))
+
+	q := dto.SessionQuery{ReportQuery: week(), Model: "claude-sonnet-5-5"}
+	rows, total, err := svc.Sessions(ctx, dto.Caller{UserID: a}, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(rows) != 1 || rows[0].ID != "mixed" || rows[0].Model != "claude-opus-5-5" {
+		t.Fatalf("sonnet filter: total=%d rows=%+v, want only mixed", total, rows)
 	}
 }

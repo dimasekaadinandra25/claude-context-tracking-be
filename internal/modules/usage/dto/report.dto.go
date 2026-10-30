@@ -80,12 +80,14 @@ func (q SessionQuery) Paging() (page, perPage int) {
 
 type SessionRow struct {
 	domain.Session
-	UserName string `json:"user_name"`
+	UserName string   `json:"user_name"`
+	Models   []string `json:"models"`
 }
 
 type SessionDetail struct {
 	Session  domain.Session     `json:"session"`
 	UserName string             `json:"user_name"`
+	Models   []string           `json:"models"`
 	Hours    []domain.HourUsage `json:"hours"`
 }
 

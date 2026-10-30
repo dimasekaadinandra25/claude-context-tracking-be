@@ -46,7 +46,14 @@ const sessionColumns = `
 	s.id, s.user_id::text, s.machine, s.project, s.title, s.model,
 	s.context_window, s.start_context, s.latest_context, s.peak_context, s.new_context,
 	s.requests, s.compactions, s.first_request_at, s.last_request_at, s.last_reported_at,
-	COALESCE(NULLIF(u.full_name, ''), u.username)`
+	COALESCE(NULLIF(u.full_name, ''), u.username),
+	COALESCE((
+		SELECT array_agg(m.model ORDER BY m.new_context DESC, m.model)
+		FROM (
+			SELECT model, SUM(new_context) AS new_context
+			FROM usage.session_hours WHERE session_id = s.id GROUP BY model
+		) m
+	), ARRAY[s.model]::text[])`
 
 func scanSession(row pgx.Row) (dto.SessionRow, error) {
 	var r dto.SessionRow
@@ -55,7 +62,7 @@ func scanSession(row pgx.Row) (dto.SessionRow, error) {
 		&s.ID, &s.UserID, &s.Machine, &s.Project, &s.Title, &s.Model,
 		&s.ContextWindow, &s.StartContext, &s.LatestContext, &s.PeakContext, &s.NewContext,
 		&s.Requests, &s.Compactions, &s.FirstRequestAt, &s.LastRequestAt, &s.LastReportedAt,
-		&r.UserName,
+		&r.UserName, &r.Models,
 	)
 	return r, err
 }
@@ -141,7 +148,8 @@ func (r *Repository) Sessions(ctx context.Context, q dto.SessionQuery, limit, of
 		WHERE s.last_request_at >= $1 AND s.last_request_at < $2
 		  AND ($3::uuid IS NULL OR s.user_id = $3::uuid)
 		  AND ($4 = '' OR s.project = $4)
-		  AND ($5 = '' OR s.model = $5)
+		  AND ($5 = '' OR s.model = $5 OR EXISTS (
+			SELECT 1 FROM usage.session_hours h WHERE h.session_id = s.id AND h.model = $5))
 		  AND ($6 = '' OR s.title ILIKE '%' || $6 || '%' OR s.project ILIKE '%' || $6 || '%')`
 	args := []any{q.From, q.To, userFilter(q.UserID), q.Project, q.Model, q.Q}
 
@@ -186,7 +194,7 @@ func (r *Repository) Session(ctx context.Context, id string) (dto.SessionDetail,
 		err := row.Scan(&h.Hour, &h.Model, &h.NewContext, &h.Requests)
 		return h, err
 	})
-	return dto.SessionDetail{Session: found.Session, UserName: found.UserName, Hours: hours}, err
+	return dto.SessionDetail{Session: found.Session, UserName: found.UserName, Models: found.Models, Hours: hours}, err
 }
 
 func (r *Repository) People(ctx context.Context) ([]dto.Person, error) {

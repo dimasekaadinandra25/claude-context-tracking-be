@@ -349,7 +349,7 @@ GET /usage/v1/sessions?from=...&to=...&project=&model=&q=&page=1&per_page=25&sor
 | Param | Notes |
 |-------|-------|
 | `project` | Exact match |
-| `model` | Exact match on the session's current model |
+| `model` | Exact match on any model the session used: its current model or the model of any of its hour rows |
 | `q` | Case-insensitive substring of `title` or `project` |
 | `page` | ≥ 1, default 1 |
 | `per_page` | 1-100, default 25 |
@@ -376,7 +376,8 @@ GET /usage/v1/sessions?from=...&to=...&project=&model=&q=&page=1&per_page=25&sor
       "first_request_at": "2026-10-30T02:11:09.123Z",
       "last_request_at": "2026-10-30T06:58:40.456Z",
       "last_reported_at": "2026-10-30T04:18:58.372578Z",
-      "user_name": "Mia"
+      "user_name": "Mia",
+      "models": ["claude-opus-5-5", "claude-sonnet-5-5"]
     }
   ],
   "message": "Sessions retrieved",
@@ -387,6 +388,8 @@ GET /usage/v1/sessions?from=...&to=...&project=&model=&q=&page=1&per_page=25&sor
 ```
 
 `new_context` and `requests` here are the session's lifetime values as sent by the app, not range sums.
+
+`model` is the session's current model. `models` lists every model the session used: the distinct models of its hour rows, ordered by their summed `new_context` (largest first), then by name. A session with no hour rows gets `[model]`.
 
 ---
 
@@ -423,6 +426,7 @@ GET /usage/v1/sessions/:id
       "last_reported_at": "2026-10-30T04:18:58.372578Z"
     },
     "user_name": "Mia",
+    "models": ["claude-opus-5-5", "claude-sonnet-5-5"],
     "hours": [
       { "hour": "2026-10-30T02:00:00Z", "model": "claude-opus-5-5", "new_context": 40000, "requests": 120 },
       { "hour": "2026-10-30T06:00:00Z", "model": "claude-sonnet-5-5", "new_context": 8000, "requests": 30 }
@@ -431,6 +435,8 @@ GET /usage/v1/sessions/:id
   "message": "Session retrieved"
 }
 ```
+
+`models` follows the same rules as in the session list.
 
 ---
 
