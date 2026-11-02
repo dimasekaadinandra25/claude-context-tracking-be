@@ -56,4 +56,5 @@ func (m *ApiKeyModule) SetupRoutes(router *gin.RouterGroup) {
 	admin.POST("/users/:id/api-keys", m.Handler.CreateForUser)
 	admin.GET("/users/:id/api-keys", m.Handler.ListForUser)
 	admin.POST("/api-keys/:id/revoke", m.Handler.AdminRevoke)
+	admin.GET("/api-keys/:id/reveal", m.Handler.Reveal)
 }

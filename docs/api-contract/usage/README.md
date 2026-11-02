@@ -98,6 +98,7 @@ An API key stops working (401) when it is revoked, expired, or its owner is deac
 | 13 | POST | `/core/v1/admin/users/:id/api-keys` | JWT, admin |
 | 14 | GET | `/core/v1/admin/users/:id/api-keys` | JWT, admin |
 | 15 | POST | `/core/v1/admin/api-keys/:id/revoke` | JWT, admin |
+| 16 | GET | `/core/v1/admin/api-keys/:id/reveal` | JWT, admin |
 
 ---
 
@@ -633,7 +634,7 @@ POST /core/v1/admin/users/:id/reset-password
 
 ### 13. Issue API Key for a User
 
-Creates a key owned by the user. **The full key is returned only in this response.** Only its SHA-256 hash is stored.
+Creates a key owned by the user. Validation uses only the SHA-256 hash of the secret; the full key is also stored AES-256-GCM encrypted so an admin can copy it later with [16. Reveal an API Key](#16-reveal-an-api-key).
 
 ```
 POST /core/v1/admin/users/:id/api-keys
@@ -724,6 +725,32 @@ POST /core/v1/admin/api-keys/:id/revoke
 ```
 
 **Errors:** 404 `API key not found`.
+
+---
+
+### 16. Reveal an API Key
+
+Returns the full key of an active key so an admin can copy it again. Admin JWT only: an API key in `X-API-Key` gets 403. The response carries `Cache-Control: no-store`; the key is never logged.
+
+```
+GET /core/v1/admin/api-keys/:id/reveal
+```
+
+**Response (200):**
+```json
+{ "data": { "key": "wiz_live_<key_id>_<secret>" }, "message": "API key revealed" }
+```
+
+**Errors:**
+
+| Status | Message | When |
+|--------|---------|------|
+| 403 | `Forbidden` | Not `super_admin`, or called with an API key |
+| 404 | `API key not found` | Unknown id or not a UUID |
+| 409 | `key was issued before it could be revealed; issue a new key` | Key issued before reveal existed (no encrypted copy), or sealed with a rotated `API_KEY_ENCRYPTION_KEY` |
+| 410 | `key is not active` | Key revoked, expired or deleted |
+
+Rotating `API_KEY_ENCRYPTION_KEY` makes existing keys un-revealable (409); they keep authenticating. Issue a new key to get a copyable one.
 
 ---
 

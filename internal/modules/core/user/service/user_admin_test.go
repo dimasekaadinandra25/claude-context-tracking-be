@@ -12,9 +12,11 @@ import (
 	"claude-usage-server/internal/modules/core/user/repository"
 	"claude-usage-server/internal/modules/usage/testdb"
 	"claude-usage-server/pkg/crypto"
+	"claude-usage-server/pkg/keycrypt"
 )
 
 func TestInactiveUserKeyRejected(t *testing.T) {
+	t.Setenv(keycrypt.EnvName, strings.Repeat("ab", 32))
 	pool := testdb.Open(t)
 	ctx := context.Background()
 	admin := testdb.User(t, pool, "boss@x.test", true)

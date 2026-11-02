@@ -8,6 +8,7 @@ import (
 	"claude-usage-server/internal/database"
 	"claude-usage-server/internal/router"
 	"claude-usage-server/pkg/jwt"
+	"claude-usage-server/pkg/keycrypt"
 	"claude-usage-server/pkg/logger"
 
 	"github.com/gin-gonic/gin"
@@ -36,6 +37,10 @@ func main() {
 		logger.Fatal("JWT secret validation failed: " + err.Error())
 	}
 	logger.Info("JWT secret validation passed")
+
+	if err := keycrypt.ValidateKey(os.Getenv(keycrypt.EnvName)); err != nil {
+		logger.Fatal("API key encryption key validation failed: " + err.Error())
+	}
 
 	// Initialize database
 	db, err := database.New(cfg.Database.GetDSN())

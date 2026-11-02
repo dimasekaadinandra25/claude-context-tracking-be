@@ -27,15 +27,15 @@ func (r *ApiKeyRepository) Create(ctx context.Context, apiKey *domain.ApiKey) er
 			id, user_id, key_id, secret_hash, key_prefix,
 			name, description, environment, scoped_permissions, ip_whitelist,
 			rate_limit, rate_limit_window, expires_at,
-			created_at, created_by, updated_at, updated_by
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+			created_at, created_by, updated_at, updated_by, secret_encrypted
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 	`
 
 	_, err := r.db.Exec(ctx, query,
 		apiKey.ID, apiKey.UserID, apiKey.KeyID, apiKey.SecretHash, apiKey.KeyPrefix,
 		apiKey.Name, apiKey.Description, apiKey.Environment, apiKey.ScopedPermissions, apiKey.IPWhitelist,
 		apiKey.RateLimit, apiKey.RateLimitWindow, apiKey.ExpiresAt,
-		apiKey.CreatedAt, apiKey.CreatedBy, apiKey.UpdatedAt, apiKey.UpdatedBy,
+		apiKey.CreatedAt, apiKey.CreatedBy, apiKey.UpdatedAt, apiKey.UpdatedBy, apiKey.SecretEncrypted,
 	)
 
 	if err != nil {
@@ -59,6 +59,23 @@ func (r *ApiKeyRepository) FindByID(ctx context.Context, id string) (*domain.Api
 	`
 
 	return r.scanApiKey(ctx, query, id)
+}
+
+func (r *ApiKeyRepository) FindForReveal(ctx context.Context, id string) (*domain.ApiKey, error) {
+	var apiKey domain.ApiKey
+	err := r.db.QueryRow(ctx, `
+		SELECT id, expires_at, revoked_at, deleted_at, secret_encrypted
+		FROM core.api_keys
+		WHERE id = $1
+	`, id).Scan(&apiKey.ID, &apiKey.ExpiresAt, &apiKey.RevokedAt, &apiKey.DeletedAt, &apiKey.SecretEncrypted)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		logger.Error("Failed to find API key for reveal", logger.Err(err))
+		return nil, err
+	}
+	return &apiKey, nil
 }
 
 // FindByKeyID finds an API key by its key_id (for authentication)

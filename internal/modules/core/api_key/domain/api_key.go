@@ -20,6 +20,7 @@ type ApiKey struct {
 	UserID            string            `json:"user_id"`
 	KeyID             string            `json:"key_id"`
 	SecretHash        string            `json:"-"` // Never expose in JSON
+	SecretEncrypted   []byte            `json:"-"`
 	KeyPrefix         string            `json:"key_prefix"`
 	Name              string            `json:"name"`
 	Description       *string           `json:"description,omitempty"`

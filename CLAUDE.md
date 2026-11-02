@@ -15,7 +15,7 @@ Design spec: `C:\Code\Claude Usage Monitor\docs\superpowers\specs\2026-10-30-usa
 ## Development Commands
 
 ```bash
-cp .env.example .env           # set JWT_SECRET
+cp .env.example .env           # set JWT_SECRET and API_KEY_ENCRYPTION_KEY (openssl rand -hex 32)
 make up                        # postgres + api + dashboard in Docker (docker compose up -d --build --wait); open http://localhost:3000
 docker compose stop api        # free 8080 before running the API on the host
 make db-setup                  # migrations + seeders (roles, seeded admin)
@@ -49,7 +49,7 @@ make test-db                                     # create/migrate/seed claude_us
 TEST_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/claude_usage_test?sslmode=disable" go test -count=1 ./...
 ```
 
-DB tests use `internal/modules/usage/testdb`: `Open(t)` skips without `TEST_DATABASE_URL`, takes a Postgres advisory lock so packages don't race, truncates `usage.*` and `core.api_keys`, and deletes every user except `admin`. `User(t, pool, email, admin)` creates a member or super admin. Never point it at `claude_usage`.
+Tests that create API keys must `t.Setenv(keycrypt.EnvName, ...)` with 64 hex chars. DB tests use `internal/modules/usage/testdb`: `Open(t)` skips without `TEST_DATABASE_URL`, takes a Postgres advisory lock so packages don't race, truncates `usage.*` and `core.api_keys`, and deletes every user except `admin`. `User(t, pool, email, admin)` creates a member or super admin. Never point it at `claude_usage`.
 
 ## Architecture
 
@@ -62,7 +62,7 @@ internal/
 │   │   ├── auth/        # signin, refresh, logout, me, change-password
 │   │   ├── user/        # /users/me, /admin/users (create, list, deactivate, activate, reset-password)
 │   │   ├── role/        # roles and permission levels
-│   │   └── api_key/     # self-service /api-keys, /admin/users/:id/api-keys, /admin/api-keys/:id/revoke
+│   │   └── api_key/     # self-service /api-keys, /admin/users/:id/api-keys, /admin/api-keys/:id/revoke|reveal
 │   └── usage/           # ingest + reports (/usage/v1)
 ├── shared/              # audit, authz, query builder, response envelope
 ├── middleware/          # JWTAuth (JWT or X-API-Key), RequireRole, RequirePermission, RejectApiKey
@@ -93,7 +93,7 @@ Full contract: `docs/api-contract/`.
 
 - Roles are level-based JSON permissions on `core.roles`. `super_admin` bypasses all checks; `member` has `{"usage":"viewer"}`.
 - Permission checks read Postgres through `internal/shared/authz` (no cache).
-- API keys are `wiz_<env>_<key_id>_<secret>`; only the SHA-256 of the secret is stored. A key fails if revoked, expired, or its owner is inactive (`"user is inactive"`).
+- API keys are `wiz_<env>_<key_id>_<secret>`; validation uses only the SHA-256 of the secret (`secret_hash`). The full key is also stored AES-256-GCM encrypted (`secret_encrypted`, `pkg/keycrypt`, key `API_KEY_ENCRYPTION_KEY` = 64 hex chars, startup fails if invalid) so admins can copy it via `GET /core/v1/admin/api-keys/:id/reveal` (410 inactive, 409 issued before reveal existed). Rotating `API_KEY_ENCRYPTION_KEY` makes existing keys un-revealable; they still work. A key fails if revoked, expired, or its owner is inactive (`"user is inactive"`).
 - Deactivating a user revokes all their keys; sign-in and refresh already refuse inactive users. Issued access tokens live until `JWT_EXPIRATION`.
 
 ## Conventions

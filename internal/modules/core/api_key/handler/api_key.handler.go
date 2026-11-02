@@ -175,6 +175,16 @@ func (h *ApiKeyHandler) AdminRevoke(c *gin.Context) {
 	response.Success(c, http.StatusOK, "API key revoked successfully", nil)
 }
 
+func (h *ApiKeyHandler) Reveal(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	key, err := h.apiKeyService.Reveal(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+	response.Success(c, http.StatusOK, "API key revealed", gin.H{"key": key})
+}
+
 // handleError handles service errors and returns appropriate HTTP responses
 func (h *ApiKeyHandler) handleError(c *gin.Context, err error) {
 	switch {
@@ -192,6 +202,10 @@ func (h *ApiKeyHandler) handleError(c *gin.Context, err error) {
 		response.Error(c, http.StatusBadRequest, "Invalid API key format", "")
 	case errors.Is(err, service.ErrApiKeyInvalidScope):
 		response.Error(c, http.StatusBadRequest, "Invalid permission scope", err.Error())
+	case errors.Is(err, service.ErrApiKeyNotActive):
+		response.Error(c, http.StatusGone, err.Error(), "")
+	case errors.Is(err, service.ErrApiKeyNotRevealable):
+		response.Error(c, http.StatusConflict, err.Error(), "")
 	case errors.Is(err, service.ErrApiKeyUserInactive):
 		response.Error(c, http.StatusUnauthorized, "API key owner account is inactive", "")
 	default:

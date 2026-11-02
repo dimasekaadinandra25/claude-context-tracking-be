@@ -50,6 +50,8 @@ make run                # start the API on http://127.0.0.1:8080
 
 `JWT_SECRET` in `.env.example` is a placeholder and must be changed: the server refuses to start in every `ENV` when the secret is empty, shorter than 32 characters, or still the placeholder. Generate one with `openssl rand -hex 32`.
 
+`API_KEY_ENCRYPTION_KEY` must be generated too (`openssl rand -hex 32`, exactly 64 hex characters); the server refuses to start when it is empty, the wrong length, not hex, or still the placeholder. Every new API key is stored AES-256-GCM encrypted with it so an admin can copy the full key later (`GET /core/v1/admin/api-keys/:id/reveal`). Anyone with database access and this key can read working API keys, so keep it out of git. Rotating it makes existing keys un-revealable (they keep working; issue a new key to copy one again).
+
 If port 5432 is taken, change the host port in `docker-compose.yml` and set `DB_PORT` to match.
 
 Seeded admin (from `.env`):
@@ -86,7 +88,7 @@ Change the password after the first sign-in (`POST /core/v1/auth/change-password
      -d '{"name":"MIA-LAPTOP"}'
    ```
 
-   `data.key` (`wiz_live_...`) is shown only once. The member pastes it into the desktop app's Settings → API key (or sets `CLAUDE_USAGE_API_KEY`), with Server URL `http://127.0.0.1:8080`.
+   `data.key` (`wiz_live_...`). An admin can copy it again later with `GET /core/v1/admin/api-keys/<key_id>/reveal` while the key is active. The member pastes it into the desktop app's Settings → API key (or sets `CLAUDE_USAGE_API_KEY`), with Server URL `http://127.0.0.1:8080`.
 
 To test ingest by hand:
 
@@ -96,7 +98,7 @@ curl -s -X POST http://127.0.0.1:8080/usage/v1/sessions \
   --data @testdata/ingest.json
 ```
 
-Other admin actions: list users (`GET /core/v1/admin/users`), reset a password, deactivate or activate a user, list or revoke a user's keys. Deactivating a user revokes all their keys and blocks sign-in.
+Other admin actions: list users (`GET /core/v1/admin/users`), reset a password, deactivate or activate a user, list, reveal or revoke a user's keys. Deactivating a user revokes all their keys and blocks sign-in.
 
 ## Commands
 
@@ -143,6 +145,7 @@ Files live in `internal/database/migrations/core` and are named by timestamp: `Y
 | `20261030000004_api_keys` | API keys (secret stored as SHA-256) |
 | `20261030000005_audit_logs` | audit logs |
 | `20261030000006_usage` | `usage.sessions`, `usage.session_hours` |
+| `20261102011256_api_key_secret_encrypted` | `api_keys.secret_encrypted` (full key, AES-256-GCM, for reveal) |
 
 ## API
 

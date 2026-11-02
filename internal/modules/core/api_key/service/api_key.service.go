@@ -16,6 +16,7 @@ import (
 	"claude-usage-server/internal/modules/core/api_key/dto"
 	"claude-usage-server/internal/modules/core/api_key/repository"
 	"claude-usage-server/pkg/jwt"
+	"claude-usage-server/pkg/keycrypt"
 	"claude-usage-server/pkg/logger"
 )
 
@@ -29,6 +30,8 @@ var (
 	ErrApiKeyInvalidFormat = errors.New("invalid API key format")
 	ErrApiKeyInvalidScope  = errors.New("invalid permission scope")
 	ErrApiKeyUserInactive  = errors.New("user is inactive")
+	ErrApiKeyNotActive     = errors.New("key is not active")
+	ErrApiKeyNotRevealable = errors.New("key was issued before it could be revealed; issue a new key")
 )
 
 // RoleRepository interface for getting user permissions
@@ -104,6 +107,31 @@ func (s *ApiKeyService) AdminRevoke(ctx context.Context, id, actorID string, rea
 	return s.apiKeyRepo.Revoke(ctx, id, actorID, reason)
 }
 
+func (s *ApiKeyService) Reveal(ctx context.Context, id string) (string, error) {
+	if uuid.Validate(id) != nil {
+		return "", ErrApiKeyNotFound
+	}
+	apiKey, err := s.apiKeyRepo.FindForReveal(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if apiKey == nil {
+		return "", ErrApiKeyNotFound
+	}
+	if !apiKey.IsValid() {
+		return "", ErrApiKeyNotActive
+	}
+	if len(apiKey.SecretEncrypted) == 0 {
+		return "", ErrApiKeyNotRevealable
+	}
+	fullKey, err := keycrypt.Open(apiKey.SecretEncrypted)
+	if err != nil {
+		logger.Error("Failed to decrypt API key", logger.String("api_key_id", id), logger.Err(err))
+		return "", ErrApiKeyNotRevealable
+	}
+	return fullKey, nil
+}
+
 func NewCreateResponse(fullKey string, apiKey *domain.ApiKey) *dto.CreateApiKeyResponse {
 	return &dto.CreateApiKeyResponse{
 		ID:        apiKey.ID,
@@ -172,12 +200,19 @@ func (s *ApiKeyService) create(
 	// Hash the secret
 	secretHash := hashSecret(secret)
 
+	secretEncrypted, err := keycrypt.Seal(fullKey)
+	if err != nil {
+		logger.Error("Failed to encrypt API key", logger.Err(err))
+		return "", nil, err
+	}
+
 	now := time.Now()
 	apiKey := &domain.ApiKey{
 		ID:                uuid.New().String(),
 		UserID:            userID,
 		KeyID:             keyID,
 		SecretHash:        secretHash,
+		SecretEncrypted:   secretEncrypted,
 		KeyPrefix:         keyPrefix,
 		Name:              req.Name,
 		Description:       req.Description,
