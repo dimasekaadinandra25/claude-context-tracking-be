@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -14,9 +15,10 @@ import (
 )
 
 const (
-	maxHours     = 2000
-	maxIDLength  = 100
-	maxModelSize = 100
+	maxHours       = 20000
+	maxIDLength    = 100
+	maxModelSize   = 100
+	maxMachineSize = 255
 )
 
 var appVersionPattern = regexp.MustCompile(`^[0-9A-Za-z.+_-]{1,32}$`)
@@ -31,8 +33,12 @@ func New(repo *repository.Repository) *Service {
 
 func (s *Service) Ingest(ctx context.Context, userID string, req dto.IngestRequest) (dto.IngestResponse, error) {
 	res := dto.IngestResponse{Rejected: []dto.Rejection{}}
-	for _, p := range req.Sessions {
-		if err := validate(p); err != nil {
+	for _, raw := range req.Sessions {
+		p, err := decode(raw)
+		if err == nil {
+			err = checkMachine(req.Machine)
+		}
+		if err != nil {
 			res.Rejected = append(res.Rejected, dto.Rejection{SessionID: p.SessionID, Reason: err.Error()})
 			continue
 		}
@@ -55,6 +61,28 @@ func (s *Service) RecordAppVersion(ctx context.Context, keyID, version string) e
 		return nil
 	}
 	return s.repo.SetAppVersion(ctx, keyID, version)
+}
+
+func decode(raw json.RawMessage) (dto.SessionPayload, error) {
+	var p dto.SessionPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		var id struct {
+			SessionID string `json:"session_id"`
+		}
+		_ = json.Unmarshal(raw, &id)
+		return dto.SessionPayload{SessionID: id.SessionID}, err
+	}
+	return p, validate(p)
+}
+
+func checkMachine(machine string) error {
+	if utf8.RuneCountInString(machine) > maxMachineSize {
+		return fmt.Errorf("machine must be at most %d characters", maxMachineSize)
+	}
+	if strings.ContainsRune(machine, 0) {
+		return errors.New("machine must not contain NUL characters")
+	}
+	return nil
 }
 
 func validate(s dto.SessionPayload) error {
@@ -83,6 +111,11 @@ func validate(s dto.SessionPayload) error {
 	if len(s.Hours) > maxHours {
 		return fmt.Errorf("at most %d hours per session", maxHours)
 	}
+	type hourKey struct {
+		hour  int64
+		model string
+	}
+	seen := make(map[hourKey]bool, len(s.Hours))
 	for _, h := range s.Hours {
 		u := h.Hour.UTC()
 		if h.Hour.IsZero() || u.Minute() != 0 || u.Second() != 0 || u.Nanosecond() != 0 {
@@ -95,6 +128,11 @@ func validate(s dto.SessionPayload) error {
 			h.InputTokens < 0 || h.CacheWriteTokens < 0 || h.CacheReadTokens < 0 {
 			return errors.New("numbers must be >= 0")
 		}
+		k := hourKey{u.Unix(), h.Model}
+		if seen[k] {
+			return errors.New("duplicate hour and model")
+		}
+		seen[k] = true
 	}
 	return nil
 }

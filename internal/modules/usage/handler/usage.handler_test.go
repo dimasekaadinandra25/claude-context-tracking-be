@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,25 +11,82 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"claude-usage-server/internal/middleware"
+	"claude-usage-server/internal/modules/usage/dto"
 	"claude-usage-server/internal/modules/usage/repository"
 	"claude-usage-server/internal/modules/usage/service"
 	"claude-usage-server/internal/testutil/testdb"
 	jwtpkg "claude-usage-server/pkg/jwt"
 )
 
-func TestIngestRejectsNulMachine(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+func ingest(user, body string, h *Handler) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/usage/v1/sessions", strings.NewReader(`{"machine":"PC\u0000","sessions":[]}`))
+	c.Request = httptest.NewRequest(http.MethodPost, "/usage/v1/sessions", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
-	middleware.SetUserContext(c, &jwtpkg.Claims{UserID: "u"})
+	middleware.SetUserContext(c, &jwtpkg.Claims{UserID: user})
 	middleware.SetAuthType(c, "api_key")
+	h.Ingest(c)
+	return w
+}
 
-	New(service.New(nil)).Ingest(c)
+func TestIngestRejectsBadMachinePerSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := New(service.New(nil))
+	for machine, reason := range map[string]string{
+		`PC\u0000`:               "machine must not contain NUL characters",
+		strings.Repeat("m", 256): "machine must be at most 255 characters",
+	} {
+		w := ingest("u", `{"machine":"`+machine+`","sessions":[{"session_id":"s1","model":"m","first_at":"2026-10-30T02:11:09Z","latest_at":"2026-10-30T02:58:40Z"}]}`, h)
+		want := `"data":{"accepted":0,"rejected":[{"session_id":"s1","reason":"` + reason + `"}]}`
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), want) {
+			t.Fatalf("machine %q: status %d body %s, want 200 with %s", machine, w.Code, w.Body.String(), want)
+		}
+	}
+}
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status %d, want 400: %s", w.Code, w.Body.String())
+func TestIngestRejectsBrokenEnvelope(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := New(service.New(nil))
+	for _, body := range []string{`{"machine":"PC","sessions":{}}`, `{"sessions":[]}`, `not json`} {
+		if w := ingest("u", body, h); w.Code != http.StatusBadRequest {
+			t.Fatalf("body %s: status %d, want 400", body, w.Code)
+		}
+	}
+}
+
+func TestIngestRejectsMalformedSessionsIndividually(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	pool := testdb.Open(t)
+	user := testdb.User(t, pool, "a@test.local", false)
+	h := New(service.New(repository.New(pool)))
+	w := ingest(user, `{"machine":"PC","sessions":[
+		{"session_id":"empty-time","model":"m","first_at":"","latest_at":"2026-10-30T02:58:40Z"},
+		{"session_id":"bad-time","model":"m","first_at":"yesterday","latest_at":"2026-10-30T02:58:40Z"},
+		{"session_id":"big","model":"m","requests":3000000000,"first_at":"2026-10-30T02:11:09Z","latest_at":"2026-10-30T02:58:40Z"},
+		{"session_id":"ok","model":"m","first_at":"2026-10-30T02:11:09Z","latest_at":"2026-10-30T02:58:40Z",
+			"hours":[{"hour":"2026-10-30T02:00:00Z","model":"m","new_context":5}]}]}`, h)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Data dto.IngestResponse `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	var rejected []string
+	for _, r := range body.Data.Rejected {
+		rejected = append(rejected, r.SessionID)
+	}
+	if body.Data.Accepted != 1 || strings.Join(rejected, ",") != "empty-time,bad-time,big" {
+		t.Fatalf("got %+v, want ok accepted and the other three rejected", body.Data)
+	}
+	var ids []string
+	if err := pool.QueryRow(context.Background(), `SELECT array_agg(id) FROM usage.sessions`).Scan(&ids); err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != "ok" {
+		t.Fatalf("stored %v, want only ok", ids)
 	}
 }
 

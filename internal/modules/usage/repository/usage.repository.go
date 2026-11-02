@@ -41,7 +41,7 @@ const upsertSession = `
 		last_request_at = EXCLUDED.last_request_at,
 		last_reported_at = NOW(),
 		updated_at = NOW()
-	WHERE usage.sessions.user_id = EXCLUDED.user_id
+	WHERE usage.sessions.user_id = EXCLUDED.user_id AND EXCLUDED.last_request_at >= usage.sessions.last_request_at
 	RETURNING id`
 
 const insertHours = `
@@ -69,7 +69,9 @@ func (r *Repository) SaveSession(ctx context.Context, s domain.Session, hours []
 		s.Requests, s.Compactions, s.FirstRequestAt, s.LastRequestAt,
 	).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
+		var owned bool
+		err = tx.QueryRow(ctx, `SELECT user_id = $2 FROM usage.sessions WHERE id = $1`, s.ID, s.UserID).Scan(&owned)
+		return owned, err
 	}
 	if err != nil {
 		return false, err

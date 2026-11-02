@@ -1,11 +1,14 @@
 package dto
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type IngestRequest struct {
-	Machine    string           `json:"machine" binding:"required,max=255"`
-	AppVersion string           `json:"app_version"`
-	Sessions   []SessionPayload `json:"sessions" binding:"max=200,dive"`
+	Machine    string            `json:"machine" binding:"required"`
+	AppVersion string            `json:"app_version"`
+	Sessions   []json.RawMessage `json:"sessions" binding:"max=200"`
 }
 
 type SessionPayload struct {

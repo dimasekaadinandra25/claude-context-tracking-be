@@ -3,7 +3,6 @@ package handler
 import (
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -38,10 +37,6 @@ func (h *Handler) Ingest(c *gin.Context) {
 			return
 		}
 		response.Error(c, http.StatusBadRequest, "Invalid request payload", err.Error())
-		return
-	}
-	if strings.ContainsRune(req.Machine, 0) {
-		response.Error(c, http.StatusBadRequest, "Invalid request payload", "machine must not contain NUL characters")
 		return
 	}
 	res, err := h.service.Ingest(c.Request.Context(), middleware.MustGetUserID(c), req)

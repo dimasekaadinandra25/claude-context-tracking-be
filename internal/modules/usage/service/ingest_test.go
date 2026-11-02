@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
@@ -19,6 +20,26 @@ func at(s string) time.Time {
 		panic(err)
 	}
 	return t
+}
+
+func encode(sessions ...dto.SessionPayload) []json.RawMessage {
+	out := make([]json.RawMessage, len(sessions))
+	for i, p := range sessions {
+		raw, err := json.Marshal(p)
+		if err != nil {
+			panic(err)
+		}
+		out[i] = raw
+	}
+	return out
+}
+
+func hours(n int) []dto.HourPayload {
+	out := make([]dto.HourPayload, n)
+	for i := range out {
+		out[i] = dto.HourPayload{Hour: at("2026-10-30T02:00:00Z").Add(time.Duration(i) * time.Hour), Model: "m"}
+	}
+	return out
 }
 
 func payload(id string) dto.SessionPayload {
@@ -54,23 +75,19 @@ func TestValidateRejectsBadSessions(t *testing.T) {
 		"negative cache_write_tokens":     func(s *dto.SessionPayload) { s.Hours[0].CacheWriteTokens = -1 },
 		"negative cache_read_tokens":      func(s *dto.SessionPayload) { s.Hours[0].CacheReadTokens = -1 },
 		"hour not on the hour":            func(s *dto.SessionPayload) { s.Hours[0].Hour = at("2026-10-30T02:30:00Z") },
-		"too many hours": func(s *dto.SessionPayload) {
-			s.Hours = make([]dto.HourPayload, 2001)
-			for i := range s.Hours {
-				s.Hours[i] = dto.HourPayload{Hour: at("2026-10-30T02:00:00Z").Add(time.Duration(i) * time.Hour), Model: "m"}
-			}
-		},
-		"empty session_id":      func(s *dto.SessionPayload) { s.SessionID = "" },
-		"long session_id":       func(s *dto.SessionPayload) { s.SessionID = string(make([]byte, 101)) },
-		"empty model":           func(s *dto.SessionPayload) { s.Model = "" },
-		"empty hour model":      func(s *dto.SessionPayload) { s.Hours[0].Model = "" },
-		"first_at after latest": func(s *dto.SessionPayload) { s.FirstAt = s.LatestAt.Add(time.Second) },
-		"missing timestamps":    func(s *dto.SessionPayload) { s.FirstAt, s.LatestAt = time.Time{}, time.Time{} },
-		"NUL in title":          func(s *dto.SessionPayload) { s.Title = "a\x00b" },
-		"NUL in hour model":     func(s *dto.SessionPayload) { s.Hours[0].Model = "m\x00" },
-		"NUL in session_id":     func(s *dto.SessionPayload) { s.SessionID = "s\x00" },
-		"NUL in project":        func(s *dto.SessionPayload) { s.Project = "p\x00" },
-		"NUL in model":          func(s *dto.SessionPayload) { s.Model = "m\x00" },
+		"too many hours":                  func(s *dto.SessionPayload) { s.Hours = hours(20001) },
+		"duplicate hour":                  func(s *dto.SessionPayload) { s.Hours[1] = s.Hours[0] },
+		"empty session_id":                func(s *dto.SessionPayload) { s.SessionID = "" },
+		"long session_id":                 func(s *dto.SessionPayload) { s.SessionID = string(make([]byte, 101)) },
+		"empty model":                     func(s *dto.SessionPayload) { s.Model = "" },
+		"empty hour model":                func(s *dto.SessionPayload) { s.Hours[0].Model = "" },
+		"first_at after latest":           func(s *dto.SessionPayload) { s.FirstAt = s.LatestAt.Add(time.Second) },
+		"missing timestamps":              func(s *dto.SessionPayload) { s.FirstAt, s.LatestAt = time.Time{}, time.Time{} },
+		"NUL in title":                    func(s *dto.SessionPayload) { s.Title = "a\x00b" },
+		"NUL in hour model":               func(s *dto.SessionPayload) { s.Hours[0].Model = "m\x00" },
+		"NUL in session_id":               func(s *dto.SessionPayload) { s.SessionID = "s\x00" },
+		"NUL in project":                  func(s *dto.SessionPayload) { s.Project = "p\x00" },
+		"NUL in model":                    func(s *dto.SessionPayload) { s.Model = "m\x00" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -105,7 +122,7 @@ func TestIngestIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	user := testdb.User(t, pool, "a@test.local", false)
 	svc := New(repository.New(pool))
-	req := dto.IngestRequest{Machine: "PC", Sessions: []dto.SessionPayload{payload("s1"), payload("s2")}}
+	req := dto.IngestRequest{Machine: "PC", Sessions: encode(payload("s1"), payload("s2"))}
 
 	var seen [][4]int64
 	for i := 0; i < 2; i++ {
@@ -131,14 +148,14 @@ func TestIngestRejectsForeignSession(t *testing.T) {
 	b := testdb.User(t, pool, "b@test.local", false)
 	svc := New(repository.New(pool))
 
-	if _, err := svc.Ingest(ctx, a, dto.IngestRequest{Machine: "A", Sessions: []dto.SessionPayload{payload("s1")}}); err != nil {
+	if _, err := svc.Ingest(ctx, a, dto.IngestRequest{Machine: "A", Sessions: encode(payload("s1"))}); err != nil {
 		t.Fatal(err)
 	}
 	before := totals(t, pool)
 
 	foreign := payload("s1")
 	foreign.NewContext = 1
-	res, err := svc.Ingest(ctx, b, dto.IngestRequest{Machine: "B", Sessions: []dto.SessionPayload{foreign, payload("s2")}})
+	res, err := svc.Ingest(ctx, b, dto.IngestRequest{Machine: "B", Sessions: encode(foreign, payload("s2"))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +184,7 @@ func TestIngestReportsInvalidSessions(t *testing.T) {
 	svc := New(repository.New(pool))
 	bad := payload("bad")
 	bad.Requests = -5
-	res, err := svc.Ingest(context.Background(), user, dto.IngestRequest{Machine: "PC", Sessions: []dto.SessionPayload{bad, payload("ok")}})
+	res, err := svc.Ingest(context.Background(), user, dto.IngestRequest{Machine: "PC", Sessions: encode(bad, payload("ok"))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,11 +199,57 @@ func TestIngestRejectsNulBytes(t *testing.T) {
 	svc := New(repository.New(pool))
 	bad := payload("bad")
 	bad.Title = "a\x00b"
-	res, err := svc.Ingest(context.Background(), user, dto.IngestRequest{Machine: "PC", Sessions: []dto.SessionPayload{bad, payload("ok")}})
+	res, err := svc.Ingest(context.Background(), user, dto.IngestRequest{Machine: "PC", Sessions: encode(bad, payload("ok"))})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res.Accepted != 1 || len(res.Rejected) != 1 || res.Rejected[0].SessionID != "bad" {
 		t.Fatalf("got %+v, want ok accepted and bad rejected", res)
+	}
+}
+
+func TestIngestAcceptsUpToMaxHours(t *testing.T) {
+	pool := testdb.Open(t)
+	user := testdb.User(t, pool, "a@test.local", false)
+	svc := New(repository.New(pool))
+	full, over := payload("full"), payload("over")
+	full.Hours, over.Hours = hours(20000), hours(20001)
+
+	res, err := svc.Ingest(context.Background(), user, dto.IngestRequest{Machine: "PC", Sessions: encode(full, over)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []dto.Rejection{{SessionID: "over", Reason: "at most 20000 hours per session"}}
+	if res.Accepted != 1 || !reflect.DeepEqual(res.Rejected, want) {
+		t.Fatalf("got %+v, want full accepted and %v", res, want)
+	}
+	if got := totals(t, pool)[2]; got != 20000 {
+		t.Fatalf("hour rows = %d, want 20000", got)
+	}
+}
+
+func TestIngestIgnoresStalePayload(t *testing.T) {
+	pool := testdb.Open(t)
+	ctx := context.Background()
+	user := testdb.User(t, pool, "a@test.local", false)
+	svc := New(repository.New(pool))
+
+	newer := payload("s1")
+	newer.LatestAt = newer.LatestAt.Add(time.Hour)
+	newer.NewContext = 50000
+	newer.Hours[1].NewContext = 10000
+	if res, err := svc.Ingest(ctx, user, dto.IngestRequest{Machine: "PC", Sessions: encode(newer)}); err != nil || res.Accepted != 1 {
+		t.Fatalf("newer: %+v %v", res, err)
+	}
+
+	res, err := svc.Ingest(ctx, user, dto.IngestRequest{Machine: "PC", Sessions: encode(payload("s1"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Accepted != 1 || len(res.Rejected) != 0 {
+		t.Fatalf("stale: %+v, want accepted 1 and no rejections", res)
+	}
+	if got, want := totals(t, pool), [4]int64{1, 50000, 2, 50000}; got != want {
+		t.Fatalf("totals = %v, want newer values %v", got, want)
 	}
 }

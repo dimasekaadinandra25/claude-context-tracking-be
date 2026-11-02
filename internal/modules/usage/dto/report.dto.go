@@ -37,6 +37,7 @@ type PersonSummary struct {
 	LastRequestAt        *time.Time `json:"last_request_at"`
 	LastSyncedAt         *time.Time `json:"last_synced_at"`
 	AppVersion           *string    `json:"app_version"`
+	IsActive             bool       `json:"is_active"`
 }
 
 type Overview struct {

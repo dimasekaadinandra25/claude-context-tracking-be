@@ -36,7 +36,7 @@ func week() dto.ReportQuery {
 
 func ingest(t *testing.T, svc *Service, userID string, sessions ...dto.SessionPayload) {
 	t.Helper()
-	res, err := svc.Ingest(context.Background(), userID, dto.IngestRequest{Machine: "PC", Sessions: sessions})
+	res, err := svc.Ingest(context.Background(), userID, dto.IngestRequest{Machine: "PC", Sessions: encode(sessions...)})
 	if err != nil || res.Accepted != len(sessions) {
 		t.Fatalf("ingest: %+v %v", res, err)
 	}
@@ -314,5 +314,70 @@ func TestSessionDetailHoursIncludeBilledTokens(t *testing.T) {
 	}
 	if h := detail.Hours[0]; len(detail.Hours) != 1 || h.InputTokens != 1000 || h.CacheWriteTokens != 2000 || h.CacheReadTokens != 100000 {
 		t.Fatalf("hours = %+v, want stored billed tokens", detail.Hours)
+	}
+}
+
+func TestOverviewReportsIsActive(t *testing.T) {
+	pool := testdb.Open(t)
+	ctx := context.Background()
+	a := testdb.User(t, pool, "a@test.local", false)
+	b := testdb.User(t, pool, "b@test.local", false)
+	admin := dto.Caller{UserID: testdb.User(t, pool, "boss@test.local", true), IsAdmin: true}
+	if _, err := pool.Exec(ctx, `UPDATE core.users SET is_active = FALSE WHERE id = $1`, b); err != nil {
+		t.Fatal(err)
+	}
+
+	ov, err := New(repository.New(pool)).Overview(ctx, admin, week())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, p := range ov.People {
+		got[p.UserID] = p.IsActive
+	}
+	if !got[a] || got[b] {
+		t.Fatalf("is_active = %v, want A true and B false", got)
+	}
+}
+
+func TestReportsSkipDeletedUsers(t *testing.T) {
+	pool := testdb.Open(t)
+	ctx := context.Background()
+	a := testdb.User(t, pool, "a@test.local", false)
+	b := testdb.User(t, pool, "b@test.local", false)
+	admin := dto.Caller{UserID: testdb.User(t, pool, "boss@test.local", true), IsAdmin: true}
+	svc := New(repository.New(pool))
+	ingest(t, svc, a, payload("a1"))
+	ingest(t, svc, b, withHours("b1", dto.HourPayload{Hour: at("2026-10-30T03:00:00Z"), Model: "claude-haiku-5", NewContext: 999, Requests: 9}))
+	if _, err := pool.Exec(ctx, `UPDATE core.users SET deleted_at = NOW() WHERE id = $1`, b); err != nil {
+		t.Fatal(err)
+	}
+
+	points, err := svc.Timeseries(ctx, admin, week(), "day", "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range points {
+		if p.Key != a {
+			t.Fatalf("timeseries includes deleted user: %+v", points)
+		}
+	}
+
+	models, err := svc.Models(ctx, admin, week())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range models {
+		if m.Model == "claude-haiku-5" {
+			t.Fatalf("models include deleted user: %+v", models)
+		}
+	}
+
+	rows, total, err := svc.Sessions(ctx, admin, dto.SessionQuery{ReportQuery: week()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(rows) != 1 || rows[0].ID != "a1" {
+		t.Fatalf("sessions total=%d rows=%+v, want only a1", total, rows)
 	}
 }

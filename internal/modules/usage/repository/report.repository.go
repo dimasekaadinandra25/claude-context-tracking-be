@@ -87,7 +87,7 @@ func (r *Repository) Overview(ctx context.Context, q dto.ReportQuery) ([]dto.Per
 		SELECT u.id::text, COALESCE(u.full_name, ''), u.email, COALESCE(ls.model, ''),
 		       COALESCE(h.new_context, 0), COALESCE(h.requests, 0), COALESCE(h.sessions, 0),
 		       COALESCE(h.output_tokens, 0), COALESCE(h.subagent_requests, 0), COALESCE(h.subagent_output_tokens, 0),
-		       ls.last_request_at, k.last_used_at, k.app_version
+		       ls.last_request_at, k.last_used_at, k.app_version, COALESCE(u.is_active, FALSE)
 		FROM core.users u
 		LEFT JOIN h ON h.user_id = u.id
 		LEFT JOIN LATERAL (
@@ -108,7 +108,7 @@ func (r *Repository) Overview(ctx context.Context, q dto.ReportQuery) ([]dto.Per
 		var p dto.PersonSummary
 		err := row.Scan(&p.UserID, &p.FullName, &p.Email, &p.CurrentModel,
 			&p.NewContext, &p.Requests, &p.Sessions,
-			&p.OutputTokens, &p.SubagentRequests, &p.SubagentOutputTokens, &p.LastRequestAt, &p.LastSyncedAt, &p.AppVersion)
+			&p.OutputTokens, &p.SubagentRequests, &p.SubagentOutputTokens, &p.LastRequestAt, &p.LastSyncedAt, &p.AppVersion, &p.IsActive)
 		return p, err
 	})
 }
@@ -119,7 +119,8 @@ func (r *Repository) Timeseries(ctx context.Context, q dto.ReportQuery, interval
 		       SUM(new_context)::bigint, SUM(requests)::bigint,
 		       SUM(output_tokens)::bigint, SUM(subagent_requests)::bigint, SUM(subagent_output_tokens)::bigint
 		FROM usage.session_hours
-		WHERE hour >= $3 AND hour < $4 AND ($5::uuid IS NULL OR user_id = $5::uuid)
+		JOIN core.users u ON u.id = user_id
+		WHERE hour >= $3 AND hour < $4 AND ($5::uuid IS NULL OR user_id = $5::uuid) AND u.deleted_at IS NULL
 		GROUP BY 1, 2
 		ORDER BY 1, 2`, groupColumns[groupBy]),
 		interval, q.TZ, q.From, q.To, userFilter(q.UserID))
@@ -138,7 +139,8 @@ func (r *Repository) Models(ctx context.Context, q dto.ReportQuery) ([]dto.Model
 		SELECT model, SUM(new_context)::bigint, SUM(requests)::bigint, COUNT(DISTINCT session_id),
 		       SUM(output_tokens)::bigint, SUM(subagent_requests)::bigint, SUM(subagent_output_tokens)::bigint
 		FROM usage.session_hours
-		WHERE hour >= $1 AND hour < $2 AND ($3::uuid IS NULL OR user_id = $3::uuid)
+		JOIN core.users u ON u.id = user_id
+		WHERE hour >= $1 AND hour < $2 AND ($3::uuid IS NULL OR user_id = $3::uuid) AND u.deleted_at IS NULL
 		GROUP BY model
 		ORDER BY 2 DESC, model`,
 		q.From, q.To, userFilter(q.UserID))
@@ -164,7 +166,8 @@ func (r *Repository) Sessions(ctx context.Context, q dto.SessionQuery, limit, of
 			FROM usage.session_hours h
 			WHERE h.session_id = s.id AND h.hour >= $1 AND h.hour < $2
 		) g ON g.new_context > 0 OR g.output_tokens > 0 OR g.subagent_requests > 0
-		WHERE ($3::uuid IS NULL OR s.user_id = $3::uuid)
+		WHERE u.deleted_at IS NULL
+		  AND ($3::uuid IS NULL OR s.user_id = $3::uuid)
 		  AND ($4 = '' OR s.project = $4)
 		  AND ($5 = '' OR s.model = $5 OR EXISTS (
 			SELECT 1 FROM usage.session_hours h WHERE h.session_id = s.id AND h.model = $5))

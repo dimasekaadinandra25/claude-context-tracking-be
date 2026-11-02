@@ -154,7 +154,7 @@ POST /usage/v1/sessions
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
-| `machine` | string | Yes | Max 255 characters |
+| `machine` | string | Yes | Max 255 characters, no NUL characters. If it breaks either rule, every session in the request is rejected with that reason |
 | `app_version` | string | No | Informational, not stored. Send the `X-App-Version` header instead |
 | `sessions` | array | Yes | Max 200 per request |
 | `sessions[].session_id` | string | Yes | Claude Code session UUID, 1-100 characters |
@@ -170,7 +170,7 @@ POST /usage/v1/sessions
 | `sessions[].compactions` | int | No | Lifetime compactions, ≥ 0 |
 | `sessions[].first_at` | RFC 3339 | Yes | Must not be after `latest_at` |
 | `sessions[].latest_at` | RFC 3339 | Yes | The app's watermark compares against this |
-| `sessions[].hours` | array | No | Max 2,000 rows per session |
+| `sessions[].hours` | array | No | Max 20,000 rows per session. Each `(hour, model)` pair at most once |
 | `hours[].hour` | RFC 3339 | Yes | A whole UTC hour |
 | `hours[].model` | string | Yes | 1-100 characters |
 | `hours[].new_context` | int | No | Growth in that hour for that model, ≥ 0 |
@@ -187,7 +187,8 @@ The body may be at most 64 MB.
 **Behaviour:**
 - Values are **absolute**. The session row and each `(session_id, hour, model)` row are replaced, never added to. Sending the same payload twice leaves the totals unchanged.
 - Each session is saved in its own transaction (session row plus hour rows).
-- A session that fails validation, or whose `session_id` already belongs to another user, is listed in `rejected`. The rest of the payload is still saved and the other user's data is untouched.
+- Each entry of `sessions` is decoded and validated on its own. A session that cannot be decoded (wrong types, timestamps that are empty or not RFC 3339, numbers out of range), fails validation, or whose `session_id` already belongs to another user, is listed in `rejected`. The rest of the payload is still saved and the other user's data is untouched. A session that cannot be decoded is listed with the `session_id` it carried, or `""` if none could be read.
+- A session whose `latest_at` is older than the stored `last_request_at` is stale (a slower, older send that arrived late). It is skipped without touching the stored session or its hours and still counts as `accepted`. An equal `latest_at` replaces the stored values.
 - `api_keys.last_used_at` is updated on every call. Reports show it as `last_synced_at`.
 - `api_keys.app_version` is set from a valid `X-App-Version` header after the batch is saved. A call without the header leaves it unchanged. Reports show it as `app_version`.
 
@@ -215,13 +216,13 @@ With a rejected session:
 }
 ```
 
-Rejection reasons: `session_id must be 1-100 characters`, `model must be 1-100 characters`, `numbers must be >= 0`, `first_at and latest_at are required`, `first_at must not be after latest_at`, `at most 2000 hours per session`, `hour must be a whole UTC hour` and `session belongs to another user`.
+Rejection reasons: `session_id must be 1-100 characters`, `model must be 1-100 characters`, `numbers must be >= 0`, `first_at and latest_at are required`, `first_at must not be after latest_at`, `at most 20000 hours per session`, `hour must be a whole UTC hour`, `duplicate hour and model`, `machine must be at most 255 characters`, `machine must not contain NUL characters`, `session belongs to another user`, and JSON decode errors for sessions that cannot be decoded.
 
 **Errors:**
 
 | Status | Message | When |
 |--------|---------|------|
-| 400 | Invalid request payload | Bad JSON, missing `machine`, or more than 200 sessions |
+| 400 | Invalid request payload | Body is not a JSON object, `sessions` is not an array, missing `machine`, or more than 200 sessions |
 | 401 | Unauthorized | No `X-API-Key` and no JWT |
 | 401 | Invalid API key | Malformed, unknown, revoked or expired key, or owner deactivated. The reason is only logged on the server |
 | 403 | Forbidden | Called with a JWT instead of an API key |
@@ -241,7 +242,7 @@ Reports 2-5 accept these query parameters:
 | `tz` | IANA name | `Asia/Jakarta` | Used for day buckets. Unknown names return 400 |
 | `user_id` | UUID | none (everyone) | **Admins only.** For members it is ignored and forced to their own ID |
 
-Ranges filter on the UTC hour of each request (`session_hours.hour`).
+Ranges filter on the UTC hour of each request (`session_hours.hour`). Usage of soft-deleted users is left out of overview, timeseries, models and the sessions list, so the tabs agree.
 
 Write `from` and `to` in UTC with a `Z` suffix (`2026-10-29T00:00:00Z`). An offset such as `+07:00` must be URL-encoded as `%2B07:00`; a raw `+` in a query string is read as a space and the request fails with 400.
 
@@ -275,7 +276,8 @@ GET /usage/v1/overview?from=2026-10-29T00:00:00Z&to=2026-10-31T00:00:00Z&tz=Asia
         "subagent_output_tokens": 6000,
         "last_request_at": "2026-10-30T06:58:40.456Z",
         "last_synced_at": "2026-10-30T04:18:58.36942Z",
-        "app_version": "0.2.0"
+        "app_version": "0.2.0",
+        "is_active": true
       },
       {
         "user_id": "b61e8255-5aef-42a3-8fdc-8c191295af10",
@@ -290,7 +292,8 @@ GET /usage/v1/overview?from=2026-10-29T00:00:00Z&to=2026-10-31T00:00:00Z&tz=Asia
         "subagent_output_tokens": 0,
         "last_request_at": null,
         "last_synced_at": null,
-        "app_version": null
+        "app_version": null,
+        "is_active": true
       }
     ],
     "total_new_context": 48000,
@@ -313,6 +316,7 @@ GET /usage/v1/overview?from=2026-10-29T00:00:00Z&to=2026-10-31T00:00:00Z&tz=Asia
 | `current_model`, `last_request_at` | From the person's most recent session overall |
 | `last_synced_at` | Latest `last_used_at` across the person's API keys |
 | `app_version` | `app_version` of the person's most recently used API key (latest `last_used_at`), or `null` |
+| `is_active` | `false` when the user is deactivated (`core.users.is_active`), so the dashboard can skip stale-sync warnings for them |
 | `active_people` | People with `new_context > 0` in the range |
 
 A member gets a single entry: themselves.
