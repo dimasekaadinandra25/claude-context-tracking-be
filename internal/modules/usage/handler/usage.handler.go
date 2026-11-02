@@ -45,6 +45,9 @@ func (h *Handler) Ingest(c *gin.Context) {
 		return
 	}
 	res, err := h.service.Ingest(c.Request.Context(), middleware.MustGetUserID(c), req)
+	if err == nil {
+		err = h.service.RecordAppVersion(c.Request.Context(), middleware.GetApiKeyID(c), c.GetHeader("X-App-Version"))
+	}
 	if err != nil {
 		logger.Error("Failed to save usage", logger.Err(err))
 		response.Error(c, http.StatusInternalServerError, "Internal server error", "")

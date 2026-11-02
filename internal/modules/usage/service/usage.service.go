@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -17,6 +18,8 @@ const (
 	maxIDLength  = 100
 	maxModelSize = 100
 )
+
+var appVersionPattern = regexp.MustCompile(`^[0-9A-Za-z.+_-]{1,32}$`)
 
 type Service struct {
 	repo *repository.Repository
@@ -44,6 +47,14 @@ func (s *Service) Ingest(ctx context.Context, userID string, req dto.IngestReque
 		res.Accepted++
 	}
 	return res, nil
+}
+
+func (s *Service) RecordAppVersion(ctx context.Context, keyID, version string) error {
+	version = strings.TrimSpace(version)
+	if !appVersionPattern.MatchString(version) {
+		return nil
+	}
+	return s.repo.SetAppVersion(ctx, keyID, version)
 }
 
 func validate(s dto.SessionPayload) error {
@@ -80,7 +91,8 @@ func validate(s dto.SessionPayload) error {
 		if err := checkModel(h.Model); err != nil {
 			return err
 		}
-		if h.NewContext < 0 || h.Requests < 0 || h.OutputTokens < 0 || h.SubagentRequests < 0 || h.SubagentOutputTokens < 0 {
+		if h.NewContext < 0 || h.Requests < 0 || h.OutputTokens < 0 || h.SubagentRequests < 0 || h.SubagentOutputTokens < 0 ||
+			h.InputTokens < 0 || h.CacheWriteTokens < 0 || h.CacheReadTokens < 0 {
 			return errors.New("numbers must be >= 0")
 		}
 	}
@@ -128,6 +140,9 @@ func toHours(in []dto.HourPayload) []domain.HourUsage {
 			OutputTokens:         h.OutputTokens,
 			SubagentRequests:     h.SubagentRequests,
 			SubagentOutputTokens: h.SubagentOutputTokens,
+			InputTokens:          h.InputTokens,
+			CacheWriteTokens:     h.CacheWriteTokens,
+			CacheReadTokens:      h.CacheReadTokens,
 		}
 	}
 	return out

@@ -29,4 +29,7 @@ type HourUsage struct {
 	OutputTokens         int64     `json:"output_tokens"`
 	SubagentRequests     int32     `json:"subagent_requests"`
 	SubagentOutputTokens int64     `json:"subagent_output_tokens"`
+	InputTokens          int64     `json:"input_tokens"`
+	CacheWriteTokens     int64     `json:"cache_write_tokens"`
+	CacheReadTokens      int64     `json:"cache_read_tokens"`
 }

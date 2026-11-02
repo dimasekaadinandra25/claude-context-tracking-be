@@ -268,3 +268,51 @@ func TestSessionsFilterMatchesAnyModel(t *testing.T) {
 		t.Fatalf("sonnet filter: total=%d rows=%+v, want only mixed", total, rows)
 	}
 }
+
+func TestOverviewAppVersionFromLatestKey(t *testing.T) {
+	pool := testdb.Open(t)
+	ctx := context.Background()
+	a := testdb.User(t, pool, "a@test.local", false)
+	b := testdb.User(t, pool, "b@test.local", false)
+	admin := dto.Caller{UserID: testdb.User(t, pool, "boss@test.local", true), IsAdmin: true}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO core.api_keys (user_id, key_id, secret_hash, key_prefix, name, last_used_at, app_version) VALUES
+			($1, 'old', 'h1', 'p', 'old', '2026-11-01T00:00:00Z', '0.1.0'),
+			($1, 'new', 'h2', 'p', 'new', '2026-11-02T00:00:00Z', '0.2.0'),
+			($1, 'unused', 'h3', 'p', 'unused', NULL, NULL)`, a); err != nil {
+		t.Fatal(err)
+	}
+
+	ov, err := New(repository.New(pool)).Overview(ctx, admin, week())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range ov.People {
+		switch p.UserID {
+		case a:
+			if p.AppVersion == nil || *p.AppVersion != "0.2.0" || p.LastSyncedAt == nil || !p.LastSyncedAt.Equal(at("2026-11-02T00:00:00Z")) {
+				t.Fatalf("A = %+v, want app_version 0.2.0 synced 2026-11-02", p)
+			}
+		case b:
+			if p.AppVersion != nil || p.LastSyncedAt != nil {
+				t.Fatalf("B = %+v, want no app_version", p)
+			}
+		}
+	}
+}
+
+func TestSessionDetailHoursIncludeBilledTokens(t *testing.T) {
+	pool := testdb.Open(t)
+	a := testdb.User(t, pool, "a@test.local", false)
+	svc := New(repository.New(pool))
+	ingest(t, svc, a, withHours("billed",
+		dto.HourPayload{Hour: at("2026-10-30T03:00:00Z"), Model: "claude-opus-5-5", NewContext: 5000, Requests: 5, InputTokens: 1000, CacheWriteTokens: 2000, CacheReadTokens: 100000}))
+
+	detail, err := svc.Session(context.Background(), dto.Caller{UserID: a}, "billed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h := detail.Hours[0]; len(detail.Hours) != 1 || h.InputTokens != 1000 || h.CacheWriteTokens != 2000 || h.CacheReadTokens != 100000 {
+		t.Fatalf("hours = %+v, want stored billed tokens", detail.Hours)
+	}
+}

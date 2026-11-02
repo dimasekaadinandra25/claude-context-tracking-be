@@ -117,6 +117,12 @@ POST /usage/v1/sessions
 
 **Auth:** `X-API-Key`
 
+**Headers:**
+
+| Header | Required | Notes |
+|--------|----------|-------|
+| `X-App-Version` | No | Desktop app version, e.g. `0.2.0`. Trimmed; stored on the API key used (`core.api_keys.app_version`) after every successful call that sends it. Ignored when empty, longer than 32 characters, or containing anything other than letters, digits, `.`, `-`, `+` and `_` |
+
 **Request:**
 ```json
 {
@@ -138,8 +144,8 @@ POST /usage/v1/sessions
       "first_at": "2026-10-30T02:11:09.123Z",
       "latest_at": "2026-10-30T06:58:40.456Z",
       "hours": [
-        { "hour": "2026-10-30T02:00:00Z", "model": "claude-opus-5-5", "new_context": 40000, "requests": 120, "output_tokens": 15000, "subagent_requests": 4, "subagent_output_tokens": 6000 },
-        { "hour": "2026-10-30T06:00:00Z", "model": "claude-sonnet-5-5", "new_context": 8000, "requests": 30, "output_tokens": 2500, "subagent_requests": 0, "subagent_output_tokens": 0 }
+        { "hour": "2026-10-30T02:00:00Z", "model": "claude-opus-5-5", "new_context": 40000, "requests": 120, "output_tokens": 15000, "subagent_requests": 4, "subagent_output_tokens": 6000, "input_tokens": 1200, "cache_write_tokens": 38000, "cache_read_tokens": 2400000 },
+        { "hour": "2026-10-30T06:00:00Z", "model": "claude-sonnet-5-5", "new_context": 8000, "requests": 30, "output_tokens": 2500, "subagent_requests": 0, "subagent_output_tokens": 0, "input_tokens": 300, "cache_write_tokens": 7700, "cache_read_tokens": 600000 }
       ]
     }
   ]
@@ -149,7 +155,7 @@ POST /usage/v1/sessions
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
 | `machine` | string | Yes | Max 255 characters |
-| `app_version` | string | No | Informational |
+| `app_version` | string | No | Informational, not stored. Send the `X-App-Version` header instead |
 | `sessions` | array | Yes | Max 200 per request |
 | `sessions[].session_id` | string | Yes | Claude Code session UUID, 1-100 characters |
 | `sessions[].project` | string | No | Working directory |
@@ -172,6 +178,9 @@ POST /usage/v1/sessions
 | `hours[].output_tokens` | int | No | Output tokens in that hour for that model, ≥ 0. Missing = 0 |
 | `hours[].subagent_requests` | int | No | Subagent (sidechain) requests in that hour for that model, ≥ 0. Missing = 0 |
 | `hours[].subagent_output_tokens` | int | No | Output tokens of those subagent requests, ≥ 0. Missing = 0 |
+| `hours[].input_tokens` | int | No | Uncached input tokens billed in that hour for that model, ≥ 0. Missing = 0 |
+| `hours[].cache_write_tokens` | int | No | Cache write (creation) tokens, ≥ 0. Missing = 0 |
+| `hours[].cache_read_tokens` | int | No | Cache read tokens, ≥ 0. Missing = 0 |
 
 The body may be at most 64 MB.
 
@@ -180,6 +189,7 @@ The body may be at most 64 MB.
 - Each session is saved in its own transaction (session row plus hour rows).
 - A session that fails validation, or whose `session_id` already belongs to another user, is listed in `rejected`. The rest of the payload is still saved and the other user's data is untouched.
 - `api_keys.last_used_at` is updated on every call. Reports show it as `last_synced_at`.
+- `api_keys.app_version` is set from a valid `X-App-Version` header after the batch is saved. A call without the header leaves it unchanged. Reports show it as `app_version`.
 
 **Response (200):**
 ```json
@@ -264,7 +274,8 @@ GET /usage/v1/overview?from=2026-10-29T00:00:00Z&to=2026-10-31T00:00:00Z&tz=Asia
         "subagent_requests": 4,
         "subagent_output_tokens": 6000,
         "last_request_at": "2026-10-30T06:58:40.456Z",
-        "last_synced_at": "2026-10-30T04:18:58.36942Z"
+        "last_synced_at": "2026-10-30T04:18:58.36942Z",
+        "app_version": "0.2.0"
       },
       {
         "user_id": "b61e8255-5aef-42a3-8fdc-8c191295af10",
@@ -278,7 +289,8 @@ GET /usage/v1/overview?from=2026-10-29T00:00:00Z&to=2026-10-31T00:00:00Z&tz=Asia
         "subagent_requests": 0,
         "subagent_output_tokens": 0,
         "last_request_at": null,
-        "last_synced_at": null
+        "last_synced_at": null,
+        "app_version": null
       }
     ],
     "total_new_context": 48000,
@@ -300,6 +312,7 @@ GET /usage/v1/overview?from=2026-10-29T00:00:00Z&to=2026-10-31T00:00:00Z&tz=Asia
 | `sessions` | Sessions with at least one hour row in the range |
 | `current_model`, `last_request_at` | From the person's most recent session overall |
 | `last_synced_at` | Latest `last_used_at` across the person's API keys |
+| `app_version` | `app_version` of the person's most recently used API key (latest `last_used_at`), or `null` |
 | `active_people` | People with `new_context > 0` in the range |
 
 A member gets a single entry: themselves.
@@ -456,8 +469,8 @@ GET /usage/v1/sessions/:id
     "user_name": "Mia",
     "models": ["claude-opus-5-5", "claude-sonnet-5-5"],
     "hours": [
-      { "hour": "2026-10-30T02:00:00Z", "model": "claude-opus-5-5", "new_context": 40000, "requests": 120, "output_tokens": 15000, "subagent_requests": 4, "subagent_output_tokens": 6000 },
-      { "hour": "2026-10-30T06:00:00Z", "model": "claude-sonnet-5-5", "new_context": 8000, "requests": 30, "output_tokens": 2500, "subagent_requests": 0, "subagent_output_tokens": 0 }
+      { "hour": "2026-10-30T02:00:00Z", "model": "claude-opus-5-5", "new_context": 40000, "requests": 120, "output_tokens": 15000, "subagent_requests": 4, "subagent_output_tokens": 6000, "input_tokens": 1200, "cache_write_tokens": 38000, "cache_read_tokens": 2400000 },
+      { "hour": "2026-10-30T06:00:00Z", "model": "claude-sonnet-5-5", "new_context": 8000, "requests": 30, "output_tokens": 2500, "subagent_requests": 0, "subagent_output_tokens": 0, "input_tokens": 300, "cache_write_tokens": 7700, "cache_read_tokens": 600000 }
     ]
   },
   "message": "Session retrieved"

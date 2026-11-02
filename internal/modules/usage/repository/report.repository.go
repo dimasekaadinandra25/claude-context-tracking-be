@@ -87,7 +87,7 @@ func (r *Repository) Overview(ctx context.Context, q dto.ReportQuery) ([]dto.Per
 		SELECT u.id::text, COALESCE(u.full_name, ''), u.email, COALESCE(ls.model, ''),
 		       COALESCE(h.new_context, 0), COALESCE(h.requests, 0), COALESCE(h.sessions, 0),
 		       COALESCE(h.output_tokens, 0), COALESCE(h.subagent_requests, 0), COALESCE(h.subagent_output_tokens, 0),
-		       ls.last_request_at, k.last_used_at
+		       ls.last_request_at, k.last_used_at, k.app_version
 		FROM core.users u
 		LEFT JOIN h ON h.user_id = u.id
 		LEFT JOIN LATERAL (
@@ -95,7 +95,8 @@ func (r *Repository) Overview(ctx context.Context, q dto.ReportQuery) ([]dto.Per
 			WHERE s.user_id = u.id ORDER BY s.last_request_at DESC LIMIT 1
 		) ls ON TRUE
 		LEFT JOIN LATERAL (
-			SELECT MAX(a.last_used_at) AS last_used_at FROM core.api_keys a WHERE a.user_id = u.id
+			SELECT a.last_used_at, a.app_version FROM core.api_keys a
+			WHERE a.user_id = u.id ORDER BY a.last_used_at DESC NULLS LAST LIMIT 1
 		) k ON TRUE
 		WHERE u.deleted_at IS NULL AND ($3::uuid IS NULL OR u.id = $3::uuid)
 		ORDER BY COALESCE(h.new_context, 0) DESC, u.email`,
@@ -107,7 +108,7 @@ func (r *Repository) Overview(ctx context.Context, q dto.ReportQuery) ([]dto.Per
 		var p dto.PersonSummary
 		err := row.Scan(&p.UserID, &p.FullName, &p.Email, &p.CurrentModel,
 			&p.NewContext, &p.Requests, &p.Sessions,
-			&p.OutputTokens, &p.SubagentRequests, &p.SubagentOutputTokens, &p.LastRequestAt, &p.LastSyncedAt)
+			&p.OutputTokens, &p.SubagentRequests, &p.SubagentOutputTokens, &p.LastRequestAt, &p.LastSyncedAt, &p.AppVersion)
 		return p, err
 	})
 }
@@ -199,7 +200,8 @@ func (r *Repository) Session(ctx context.Context, id string) (dto.SessionDetail,
 		return dto.SessionDetail{}, err
 	}
 	rows, err := r.db.Query(ctx, `
-		SELECT hour, model, new_context, requests, output_tokens, subagent_requests, subagent_output_tokens
+		SELECT hour, model, new_context, requests, output_tokens, subagent_requests, subagent_output_tokens,
+		       input_tokens, cache_write_tokens, cache_read_tokens
 		FROM usage.session_hours
 		WHERE session_id = $1
 		ORDER BY hour, model`, id)
@@ -208,7 +210,8 @@ func (r *Repository) Session(ctx context.Context, id string) (dto.SessionDetail,
 	}
 	hours, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.HourUsage, error) {
 		var h domain.HourUsage
-		err := row.Scan(&h.Hour, &h.Model, &h.NewContext, &h.Requests, &h.OutputTokens, &h.SubagentRequests, &h.SubagentOutputTokens)
+		err := row.Scan(&h.Hour, &h.Model, &h.NewContext, &h.Requests, &h.OutputTokens, &h.SubagentRequests, &h.SubagentOutputTokens,
+			&h.InputTokens, &h.CacheWriteTokens, &h.CacheReadTokens)
 		return h, err
 	})
 	return dto.SessionDetail{Session: found.Session, UserName: found.UserName, Models: found.Models, Hours: hours}, err

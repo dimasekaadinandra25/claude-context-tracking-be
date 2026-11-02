@@ -36,6 +36,7 @@ type PersonSummary struct {
 	SubagentOutputTokens int64      `json:"subagent_output_tokens"`
 	LastRequestAt        *time.Time `json:"last_request_at"`
 	LastSyncedAt         *time.Time `json:"last_synced_at"`
+	AppVersion           *string    `json:"app_version"`
 }
 
 type Overview struct {

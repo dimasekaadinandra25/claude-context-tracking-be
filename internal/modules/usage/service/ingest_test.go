@@ -50,6 +50,9 @@ func TestValidateRejectsBadSessions(t *testing.T) {
 		"negative output_tokens":          func(s *dto.SessionPayload) { s.Hours[0].OutputTokens = -1 },
 		"negative subagent_requests":      func(s *dto.SessionPayload) { s.Hours[0].SubagentRequests = -1 },
 		"negative subagent_output_tokens": func(s *dto.SessionPayload) { s.Hours[0].SubagentOutputTokens = -1 },
+		"negative input_tokens":           func(s *dto.SessionPayload) { s.Hours[0].InputTokens = -1 },
+		"negative cache_write_tokens":     func(s *dto.SessionPayload) { s.Hours[0].CacheWriteTokens = -1 },
+		"negative cache_read_tokens":      func(s *dto.SessionPayload) { s.Hours[0].CacheReadTokens = -1 },
 		"hour not on the hour":            func(s *dto.SessionPayload) { s.Hours[0].Hour = at("2026-10-30T02:30:00Z") },
 		"too many hours": func(s *dto.SessionPayload) {
 			s.Hours = make([]dto.HourPayload, 2001)

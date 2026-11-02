@@ -45,10 +45,14 @@ const upsertSession = `
 	RETURNING id`
 
 const insertHours = `
-	INSERT INTO usage.session_hours (session_id, hour, model, user_id, new_context, requests, output_tokens, subagent_requests, subagent_output_tokens)
-	SELECT $1, h.hour, h.model, $6, h.new_context, h.requests, h.output_tokens, h.subagent_requests, h.subagent_output_tokens
-	FROM unnest($2::timestamptz[], $3::text[], $4::bigint[], $5::int[], $7::bigint[], $8::int[], $9::bigint[])
-		AS h(hour, model, new_context, requests, output_tokens, subagent_requests, subagent_output_tokens)
+	INSERT INTO usage.session_hours (
+		session_id, hour, model, user_id, new_context, requests, output_tokens, subagent_requests, subagent_output_tokens,
+		input_tokens, cache_write_tokens, cache_read_tokens
+	)
+	SELECT $1, h.hour, h.model, $6, h.new_context, h.requests, h.output_tokens, h.subagent_requests, h.subagent_output_tokens,
+		h.input_tokens, h.cache_write_tokens, h.cache_read_tokens
+	FROM unnest($2::timestamptz[], $3::text[], $4::bigint[], $5::int[], $7::bigint[], $8::int[], $9::bigint[], $10::bigint[], $11::bigint[], $12::bigint[])
+		AS h(hour, model, new_context, requests, output_tokens, subagent_requests, subagent_output_tokens, input_tokens, cache_write_tokens, cache_read_tokens)
 	ON CONFLICT (session_id, hour, model) DO NOTHING`
 
 func (r *Repository) SaveSession(ctx context.Context, s domain.Session, hours []domain.HourUsage) (bool, error) {
@@ -81,12 +85,21 @@ func (r *Repository) SaveSession(ctx context.Context, s domain.Session, hours []
 	output := make([]int64, len(hours))
 	subRequests := make([]int32, len(hours))
 	subOutput := make([]int64, len(hours))
+	input := make([]int64, len(hours))
+	cacheWrite := make([]int64, len(hours))
+	cacheRead := make([]int64, len(hours))
 	for i, h := range hours {
 		at[i], models[i], newContext[i], requests[i] = h.Hour, h.Model, h.NewContext, h.Requests
 		output[i], subRequests[i], subOutput[i] = h.OutputTokens, h.SubagentRequests, h.SubagentOutputTokens
+		input[i], cacheWrite[i], cacheRead[i] = h.InputTokens, h.CacheWriteTokens, h.CacheReadTokens
 	}
-	if _, err := tx.Exec(ctx, insertHours, s.ID, at, models, newContext, requests, s.UserID, output, subRequests, subOutput); err != nil {
+	if _, err := tx.Exec(ctx, insertHours, s.ID, at, models, newContext, requests, s.UserID, output, subRequests, subOutput, input, cacheWrite, cacheRead); err != nil {
 		return false, err
 	}
 	return true, tx.Commit(ctx)
+}
+
+func (r *Repository) SetAppVersion(ctx context.Context, keyID, version string) error {
+	_, err := r.db.Exec(ctx, `UPDATE core.api_keys SET app_version = $2 WHERE key_id = $1 AND deleted_at IS NULL`, keyID, version)
+	return err
 }
