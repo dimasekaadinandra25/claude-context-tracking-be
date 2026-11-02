@@ -1,7 +1,7 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-INSERT INTO core.users (email, username, password_hash, full_name, is_active, is_email_verified, email_verified_at)
-VALUES (:'admin_email', 'admin', crypt(:'admin_password', gen_salt('bf', 10)), 'Administrator', TRUE, TRUE, NOW())
+INSERT INTO core.users (email, username, password_hash, full_name, is_active, is_email_verified, email_verified_at, must_change_password)
+VALUES (:'admin_email', 'admin', crypt(:'admin_password', gen_salt('bf', 10)), 'Administrator', TRUE, TRUE, NOW(), TRUE)
 ON CONFLICT DO NOTHING;
 
 INSERT INTO core.user_roles (user_id, role_id)

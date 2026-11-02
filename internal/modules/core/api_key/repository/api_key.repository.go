@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -48,6 +49,9 @@ func (r *ApiKeyRepository) Create(ctx context.Context, apiKey *domain.ApiKey) er
 
 // FindByID finds an API key by ID
 func (r *ApiKeyRepository) FindByID(ctx context.Context, id string) (*domain.ApiKey, error) {
+	if uuid.Validate(id) != nil {
+		return nil, nil
+	}
 	query := `
 		SELECT id, user_id, key_id, secret_hash, key_prefix,
 		       name, description, environment, scoped_permissions, ip_whitelist,
@@ -253,6 +257,14 @@ func (r *ApiKeyRepository) UserActive(ctx context.Context, userID string) (bool,
 		logger.Error("Failed to check API key owner", logger.Err(err))
 	}
 	return active, err
+}
+
+func (r *ApiKeyRepository) UserExists(ctx context.Context, userID string) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM core.users WHERE id::text = $1 AND deleted_at IS NULL)
+	`, userID).Scan(&exists)
+	return exists, err
 }
 
 // Delete soft deletes an API key

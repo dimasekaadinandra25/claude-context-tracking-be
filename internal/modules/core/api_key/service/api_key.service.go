@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -30,6 +31,7 @@ var (
 	ErrApiKeyInvalidFormat = errors.New("invalid API key format")
 	ErrApiKeyInvalidScope  = errors.New("invalid permission scope")
 	ErrApiKeyUserInactive  = errors.New("user is inactive")
+	ErrApiKeyUserNotFound  = errors.New("user not found")
 	ErrApiKeyNotActive     = errors.New("key is not active")
 	ErrApiKeyNotRevealable = errors.New("key was issued before it could be revealed; issue a new key")
 )
@@ -79,6 +81,17 @@ func (s *ApiKeyService) CreateForUser(ctx context.Context, actorID, userID, name
 		return "", nil, ErrApiKeyUserInactive
 	}
 	return s.create(ctx, &dto.CreateApiKeyRequest{Name: name}, userID, actorID)
+}
+
+func (s *ApiKeyService) ListForUser(ctx context.Context, userID string, params *dto.ApiKeyQueryParams) (*dto.ApiKeyListResponse, error) {
+	exists, err := s.apiKeyRepo.UserExists(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrApiKeyUserNotFound
+	}
+	return s.List(ctx, userID, params)
 }
 
 func (s *ApiKeyService) RevokeAllForUser(ctx context.Context, actorID, userID, reason string) error {
@@ -399,8 +412,7 @@ func (s *ApiKeyService) ValidateAndGetClaims(
 	}
 
 	// Verify secret
-	secretHash := hashSecret(secret)
-	if secretHash != apiKey.SecretHash {
+	if subtle.ConstantTimeCompare([]byte(hashSecret(secret)), []byte(apiKey.SecretHash)) != 1 {
 		return nil, ErrApiKeyInvalidSecret
 	}
 

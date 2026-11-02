@@ -12,7 +12,6 @@ import (
 	"claude-usage-server/internal/modules/core/user"
 	"claude-usage-server/internal/modules/usage"
 
-	"claude-usage-server/internal/shared/audit"
 	"claude-usage-server/internal/shared/authz"
 
 	"claude-usage-server/pkg/logger"
@@ -66,17 +65,13 @@ func Setup(router *gin.Engine, db *pgxpool.Pool) {
 
 		userModule := user.Initialize(db)
 		userModule.SetupRoutes(coreV1)
+		middleware.SetUserValidator(userModule.Service)
 
 		apiKeyModule := api_key.Initialize(db, roleModule.Repository)
 		apiKeyModule.SetupRoutes(coreV1)
 		middleware.SetApiKeyValidator(apiKeyModule.Service)
 		userModule.Service.SetKeyRevoker(apiKeyModule.Service)
 	}
-
-	// Shared audit module (polymorphic, used by any feature that wants
-	// per-entity history).
-	auditModule := audit.Initialize(db)
-	auditModule.SetupRoutes(coreV1)
 
 	usage.Initialize(db).SetupRoutes(router.Group("/usage/v1"))
 

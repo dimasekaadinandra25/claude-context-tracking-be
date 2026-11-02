@@ -7,7 +7,7 @@ import (
 
 	"claude-usage-server/internal/modules/usage/domain"
 	"claude-usage-server/internal/modules/usage/repository"
-	"claude-usage-server/internal/modules/usage/testdb"
+	"claude-usage-server/internal/testutil/testdb"
 )
 
 func at(s string) time.Time {

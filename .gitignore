@@ -49,3 +49,5 @@ logs/
 # Temporary files
 tmp/
 temp/
+
+backups/

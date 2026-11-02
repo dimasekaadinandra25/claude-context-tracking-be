@@ -80,7 +80,7 @@ func validate(s dto.SessionPayload) error {
 		if err := checkModel(h.Model); err != nil {
 			return err
 		}
-		if h.NewContext < 0 || h.Requests < 0 {
+		if h.NewContext < 0 || h.Requests < 0 || h.OutputTokens < 0 || h.SubagentRequests < 0 || h.SubagentOutputTokens < 0 {
 			return errors.New("numbers must be >= 0")
 		}
 	}
@@ -120,7 +120,15 @@ func toSession(userID, machine string, p dto.SessionPayload) domain.Session {
 func toHours(in []dto.HourPayload) []domain.HourUsage {
 	out := make([]domain.HourUsage, len(in))
 	for i, h := range in {
-		out[i] = domain.HourUsage{Hour: h.Hour.UTC(), Model: h.Model, NewContext: h.NewContext, Requests: h.Requests}
+		out[i] = domain.HourUsage{
+			Hour:                 h.Hour.UTC(),
+			Model:                h.Model,
+			NewContext:           h.NewContext,
+			Requests:             h.Requests,
+			OutputTokens:         h.OutputTokens,
+			SubagentRequests:     h.SubagentRequests,
+			SubagentOutputTokens: h.SubagentOutputTokens,
+		}
 	}
 	return out
 }

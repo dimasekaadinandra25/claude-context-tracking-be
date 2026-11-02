@@ -14,6 +14,8 @@ import (
 	"claude-usage-server/pkg/logger"
 )
 
+const maxIngestBytes = 64 << 20
+
 type Handler struct {
 	service *service.Service
 }
@@ -27,8 +29,14 @@ func (h *Handler) Ingest(c *gin.Context) {
 		response.Error(c, http.StatusForbidden, "Forbidden", "ingest requires an API key")
 		return
 	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxIngestBytes)
 	var req dto.IngestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			response.Error(c, http.StatusRequestEntityTooLarge, "Request body too large", "")
+			return
+		}
 		response.Error(c, http.StatusBadRequest, "Invalid request payload", err.Error())
 		return
 	}

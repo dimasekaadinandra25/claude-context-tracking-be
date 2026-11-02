@@ -19,8 +19,9 @@ type SignInResponse struct {
 
 // UserInfo represents basic user info in auth response
 type UserInfo struct {
-	ID       string  `json:"id"`
-	Email    string  `json:"email"`
-	Username string  `json:"username"`
-	FullName *string `json:"full_name,omitempty"`
+	ID                 string  `json:"id"`
+	Email              string  `json:"email"`
+	Username           string  `json:"username"`
+	FullName           *string `json:"full_name,omitempty"`
+	MustChangePassword bool    `json:"must_change_password"`
 }

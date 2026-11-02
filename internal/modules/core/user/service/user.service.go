@@ -123,18 +123,19 @@ func (s *UserService) Create(ctx context.Context, req *dto.CreateUserRequest, cr
 
 	now := time.Now()
 	user := &domain.User{
-		ID:              uuid.New().String(),
-		Email:           req.Email,
-		Username:        req.Username,
-		PasswordHash:    passwordHash,
-		FullName:        req.FullName,
-		Phone:           req.Phone,
-		IsActive:        true,
-		IsEmailVerified: true,
-		CreatedAt:       now,
-		CreatedBy:       &createdBy,
-		UpdatedAt:       now,
-		UpdatedBy:       &createdBy,
+		ID:                 uuid.New().String(),
+		Email:              req.Email,
+		Username:           req.Username,
+		PasswordHash:       passwordHash,
+		FullName:           req.FullName,
+		Phone:              req.Phone,
+		IsActive:           true,
+		IsEmailVerified:    true,
+		MustChangePassword: true,
+		CreatedAt:          now,
+		CreatedBy:          &createdBy,
+		UpdatedAt:          now,
+		UpdatedBy:          &createdBy,
 	}
 
 	tx, err := s.userRepo.BeginTx(ctx)
@@ -254,6 +255,10 @@ func (s *UserService) Update(ctx context.Context, id string, req *dto.UpdateUser
 
 	response := s.toUserResponse(user)
 	return &response, nil
+}
+
+func (s *UserService) IsActiveUser(ctx context.Context, id string) (bool, error) {
+	return s.userRepo.IsActive(ctx, id)
 }
 
 // GetMe returns current user profile

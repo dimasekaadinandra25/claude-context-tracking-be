@@ -37,6 +37,7 @@ Compose runs three services, all `restart: unless-stopped` and published only on
 | `postgres` | `127.0.0.1:5432` | Data in the `pgdata` volume |
 | `api` | http://127.0.0.1:8080 | Runs migrations and the idempotent seeders on every start |
 | `dashboard` | http://localhost:3000 | Built from `../claude-usage-dashboard` |
+| `backup` | none | Daily `pg_dump` of `claude_usage` into `./backups` (see [Backups](#backups)) |
 
 After changing server or dashboard code, run `docker compose up -d --build --wait` again. `docker compose down` stops everything and keeps the data.
 
@@ -60,7 +61,7 @@ Seeded admin (from `.env`):
 |-------|----------|
 | `admin@claude-usage.local` (`SEED_ADMIN_EMAIL`) | `<SEED_ADMIN_PASSWORD>` (`SEED_ADMIN_PASSWORD`) |
 
-Change the password after the first sign-in (`POST /core/v1/auth/change-password`).
+The seeded admin starts with `must_change_password`, so the dashboard asks for a new password at the first sign-in (`POST /core/v1/auth/change-password`). Members created by an admin, and users whose password an admin reset, get the same prompt.
 
 ## Add a Team Member and Issue a Key
 
@@ -98,7 +99,7 @@ curl -s -X POST http://127.0.0.1:8080/usage/v1/sessions \
   --data @testdata/ingest.json
 ```
 
-Other admin actions: list users (`GET /core/v1/admin/users`), reset a password, deactivate or activate a user, list, reveal or revoke a user's keys. Deactivating a user revokes all their keys and blocks sign-in.
+Other admin actions: list users (`GET /core/v1/admin/users`), reset a password, deactivate or activate a user, list, reveal or revoke a user's keys. Deactivating a user revokes all their keys, blocks sign-in and ends their dashboard sessions on the next request.
 
 ## Commands
 
@@ -115,6 +116,26 @@ Other admin actions: list users (`GET /core/v1/admin/users`), reset a password, 
 | `make migrate-version` | Show the schema version |
 | `make migrate-create NAME=add_foo MODULE=core` | New timestamped migration pair |
 | `make test-db` | Create, migrate and seed `claude_usage_test` |
+| `make backup` | Dump `claude_usage` into `./backups` now |
+| `make restore FILE=... RESTORE_CONFIRM=yes` | Replace `claude_usage` with a dump |
+
+## Backups
+
+The `backup` service (`postgres:17-alpine`) runs `pg_dump --clean --if-exists` of `claude_usage` once on start and then every 24 hours, writing `./backups/claude_usage-YYYYMMDD-HHMMSS.sql.gz` (UTC). A dump is written to a `.tmp` file and renamed only when `pg_dump` succeeds, so a failed run leaves no partial file. Dumps older than 14 days are deleted after each run. It uses `DB_PASSWORD` from `.env` as `PGPASSWORD`. `backups/` is ignored by git and by the Docker build.
+
+Check it with `docker compose logs backup`. Take a dump now with:
+
+```bash
+make backup
+```
+
+Restore one (this replaces every table in `claude_usage`; the restore runs in one transaction, so a failure leaves the database unchanged):
+
+```bash
+make restore FILE=backups/claude_usage-20261102-020000.sql.gz RESTORE_CONFIRM=yes
+```
+
+Without `RESTORE_CONFIRM=yes` the target only prints what it would do. The dumps live on the same machine as the database; copy `./backups` somewhere else to survive a disk failure.
 
 ## Tests
 
@@ -143,9 +164,11 @@ Files live in `internal/database/migrations/core` and are named by timestamp: `Y
 | `20261030000002_users` | users, refresh tokens |
 | `20261030000003_rbac` | roles, user roles |
 | `20261030000004_api_keys` | API keys (secret stored as SHA-256) |
-| `20261030000005_audit_logs` | audit logs |
+| `20261030000005_audit_logs` | audit logs table (unused; nothing writes to it) |
 | `20261030000006_usage` | `usage.sessions`, `usage.session_hours` |
 | `20261102011256_api_key_secret_encrypted` | `api_keys.secret_encrypted` (full key, AES-256-GCM, for reveal) |
+| `20261102014445_users_must_change_password` | `users.must_change_password`, set for the seeded `admin` |
+| `20261102015038_session_hours_output_subagent` | `session_hours.output_tokens`, `subagent_requests`, `subagent_output_tokens` |
 
 ## API
 

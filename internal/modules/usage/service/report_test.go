@@ -9,7 +9,7 @@ import (
 
 	"claude-usage-server/internal/modules/usage/dto"
 	"claude-usage-server/internal/modules/usage/repository"
-	"claude-usage-server/internal/modules/usage/testdb"
+	"claude-usage-server/internal/testutil/testdb"
 )
 
 func TestScope(t *testing.T) {

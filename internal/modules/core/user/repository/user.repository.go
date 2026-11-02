@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -46,9 +47,9 @@ func (r *UserRepository) createWith(ctx context.Context, q dbExec, user *domain.
 	query := `
 		INSERT INTO core.users (
 			id, email, username, password_hash, full_name, phone, avatar_url,
-			is_active, is_email_verified, created_at, created_by, updated_at, updated_by
+			is_active, is_email_verified, created_at, created_by, updated_at, updated_by, must_change_password
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
 		)
 	`
 
@@ -56,7 +57,7 @@ func (r *UserRepository) createWith(ctx context.Context, q dbExec, user *domain.
 		user.ID, user.Email, user.Username, user.PasswordHash,
 		user.FullName, user.Phone, user.AvatarURL,
 		user.IsActive, user.IsEmailVerified,
-		user.CreatedAt, user.CreatedBy, user.UpdatedAt, user.UpdatedBy,
+		user.CreatedAt, user.CreatedBy, user.UpdatedAt, user.UpdatedBy, user.MustChangePassword,
 	)
 
 	if err != nil {
@@ -87,11 +88,14 @@ func (r *UserRepository) BeginTx(ctx context.Context) (pgx.Tx, error) {
 
 // FindByID finds a user by ID
 func (r *UserRepository) FindByID(ctx context.Context, id string) (*domain.User, error) {
+	if uuid.Validate(id) != nil {
+		return nil, nil
+	}
 	query := `
 		SELECT id, email, username, COALESCE(password_hash, '') AS password_hash, full_name, phone, avatar_url,
 		       is_active, is_email_verified, email_verified_at,
 		       failed_login_count, locked_until, last_login_at,
-		       created_at, created_by, updated_at, updated_by, deleted_at, deleted_by
+		       created_at, created_by, updated_at, updated_by, deleted_at, deleted_by, must_change_password
 		FROM core.users
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -103,7 +107,7 @@ func (r *UserRepository) FindByID(ctx context.Context, id string) (*domain.User,
 		&user.IsActive, &user.IsEmailVerified, &user.EmailVerifiedAt,
 		&user.FailedLoginCount, &user.LockedUntil, &user.LastLoginAt,
 		&user.CreatedAt, &user.CreatedBy, &user.UpdatedAt, &user.UpdatedBy,
-		&user.DeletedAt, &user.DeletedBy,
+		&user.DeletedAt, &user.DeletedBy, &user.MustChangePassword,
 	)
 
 	if err != nil {
@@ -117,13 +121,22 @@ func (r *UserRepository) FindByID(ctx context.Context, id string) (*domain.User,
 	return &user, nil
 }
 
+func (r *UserRepository) IsActive(ctx context.Context, id string) (bool, error) {
+	var active bool
+	err := r.db.QueryRow(ctx, `SELECT COALESCE(is_active, FALSE) FROM core.users WHERE id = $1 AND deleted_at IS NULL`, id).Scan(&active)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return active, err
+}
+
 // FindByEmail finds a user by email
 func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*domain.User, error) {
 	query := `
 		SELECT id, email, username, COALESCE(password_hash, '') AS password_hash, full_name, phone, avatar_url,
 		       is_active, is_email_verified, email_verified_at,
 		       failed_login_count, locked_until, last_login_at,
-		       created_at, created_by, updated_at, updated_by, deleted_at, deleted_by
+		       created_at, created_by, updated_at, updated_by, deleted_at, deleted_by, must_change_password
 		FROM core.users
 		WHERE email = $1 AND deleted_at IS NULL
 	`
@@ -135,7 +148,7 @@ func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*domain
 		&user.IsActive, &user.IsEmailVerified, &user.EmailVerifiedAt,
 		&user.FailedLoginCount, &user.LockedUntil, &user.LastLoginAt,
 		&user.CreatedAt, &user.CreatedBy, &user.UpdatedAt, &user.UpdatedBy,
-		&user.DeletedAt, &user.DeletedBy,
+		&user.DeletedAt, &user.DeletedBy, &user.MustChangePassword,
 	)
 
 	if err != nil {
@@ -155,7 +168,7 @@ func (r *UserRepository) FindByUsername(ctx context.Context, username string) (*
 		SELECT id, email, username, COALESCE(password_hash, '') AS password_hash, full_name, phone, avatar_url,
 		       is_active, is_email_verified, email_verified_at,
 		       failed_login_count, locked_until, last_login_at,
-		       created_at, created_by, updated_at, updated_by, deleted_at, deleted_by
+		       created_at, created_by, updated_at, updated_by, deleted_at, deleted_by, must_change_password
 		FROM core.users
 		WHERE username = $1 AND deleted_at IS NULL
 	`
@@ -167,7 +180,7 @@ func (r *UserRepository) FindByUsername(ctx context.Context, username string) (*
 		&user.IsActive, &user.IsEmailVerified, &user.EmailVerifiedAt,
 		&user.FailedLoginCount, &user.LockedUntil, &user.LastLoginAt,
 		&user.CreatedAt, &user.CreatedBy, &user.UpdatedAt, &user.UpdatedBy,
-		&user.DeletedAt, &user.DeletedBy,
+		&user.DeletedAt, &user.DeletedBy, &user.MustChangePassword,
 	)
 
 	if err != nil {
@@ -187,7 +200,7 @@ func (r *UserRepository) FindByEmailOrUsername(ctx context.Context, login string
 		SELECT id, email, username, COALESCE(password_hash, '') AS password_hash, full_name, phone, avatar_url,
 		       is_active, is_email_verified, email_verified_at,
 		       failed_login_count, locked_until, last_login_at,
-		       created_at, created_by, updated_at, updated_by, deleted_at, deleted_by
+		       created_at, created_by, updated_at, updated_by, deleted_at, deleted_by, must_change_password
 		FROM core.users
 		WHERE (email = $1 OR username = $1) AND deleted_at IS NULL
 	`
@@ -199,7 +212,7 @@ func (r *UserRepository) FindByEmailOrUsername(ctx context.Context, login string
 		&user.IsActive, &user.IsEmailVerified, &user.EmailVerifiedAt,
 		&user.FailedLoginCount, &user.LockedUntil, &user.LastLoginAt,
 		&user.CreatedAt, &user.CreatedBy, &user.UpdatedAt, &user.UpdatedBy,
-		&user.DeletedAt, &user.DeletedBy,
+		&user.DeletedAt, &user.DeletedBy, &user.MustChangePassword,
 	)
 
 	if err != nil {
@@ -252,7 +265,7 @@ func (r *UserRepository) FindAll(ctx context.Context, params *dto.UserQueryParam
 	dataQuery := fmt.Sprintf(`SELECT u.id, u.email, u.username, COALESCE(u.password_hash, '') AS password_hash, u.full_name, u.phone, u.avatar_url,
 		       u.is_active, u.is_email_verified, u.email_verified_at,
 		       u.failed_login_count, u.locked_until, u.last_login_at,
-		       u.created_at, u.created_by, u.updated_at, u.updated_by, u.deleted_at, u.deleted_by
+		       u.created_at, u.created_by, u.updated_at, u.updated_by, u.deleted_at, u.deleted_by, u.must_change_password
 		FROM core.users u
 		WHERE %s
 		ORDER BY u.created_at DESC
@@ -277,7 +290,7 @@ func (r *UserRepository) FindAll(ctx context.Context, params *dto.UserQueryParam
 			&user.IsActive, &user.IsEmailVerified, &user.EmailVerifiedAt,
 			&user.FailedLoginCount, &user.LockedUntil, &user.LastLoginAt,
 			&user.CreatedAt, &user.CreatedBy, &user.UpdatedAt, &user.UpdatedBy,
-			&user.DeletedAt, &user.DeletedBy,
+			&user.DeletedAt, &user.DeletedBy, &user.MustChangePassword,
 		)
 		if err != nil {
 			logger.Error("Failed to scan user", logger.Err(err))
@@ -340,7 +353,7 @@ func (r *UserRepository) Update(ctx context.Context, user *domain.User) error {
 func (r *UserRepository) UpdatePassword(ctx context.Context, id, passwordHash, updatedBy string) error {
 	query := `
 		UPDATE core.users
-		SET password_hash = $2, updated_at = $3, updated_by = $4
+		SET password_hash = $2, must_change_password = FALSE, updated_at = $3, updated_by = $4
 		WHERE id = $1 AND deleted_at IS NULL
 	`
 
@@ -357,7 +370,7 @@ func (r *UserRepository) ResetPassword(ctx context.Context, id, passwordHash, up
 	query := `
 		WITH u AS (
 			UPDATE core.users
-			SET password_hash = $2, updated_at = $3, updated_by = $4
+			SET password_hash = $2, must_change_password = TRUE, updated_at = $3, updated_by = $4
 			WHERE id = $1 AND deleted_at IS NULL
 			RETURNING id
 		)

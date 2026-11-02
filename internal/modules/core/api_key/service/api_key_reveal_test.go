@@ -10,7 +10,7 @@ import (
 
 	"claude-usage-server/internal/modules/core/api_key/repository"
 	roleRepository "claude-usage-server/internal/modules/core/role/repository"
-	"claude-usage-server/internal/modules/usage/testdb"
+	"claude-usage-server/internal/testutil/testdb"
 	"claude-usage-server/pkg/keycrypt"
 )
 

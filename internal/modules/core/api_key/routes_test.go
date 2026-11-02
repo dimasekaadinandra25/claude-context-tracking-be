@@ -13,7 +13,8 @@ import (
 	"claude-usage-server/internal/middleware"
 	"claude-usage-server/internal/modules/core/api_key"
 	roleRepository "claude-usage-server/internal/modules/core/role/repository"
-	"claude-usage-server/internal/modules/usage/testdb"
+	"claude-usage-server/internal/modules/core/user"
+	"claude-usage-server/internal/testutil/testdb"
 	jwtpkg "claude-usage-server/pkg/jwt"
 	"claude-usage-server/pkg/keycrypt"
 )
@@ -28,6 +29,7 @@ func TestApiKeyCannotCreateApiKeys(t *testing.T) {
 
 	module := api_key.Initialize(pool, roleRepository.NewRoleRepository(pool))
 	middleware.SetApiKeyValidator(module.Service)
+	middleware.SetUserValidator(user.Initialize(pool).Service)
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	module.SetupRoutes(engine.Group("/core/v1"))
@@ -68,6 +70,7 @@ func TestRevealRequiresAdminJWT(t *testing.T) {
 
 	module := api_key.Initialize(pool, roleRepository.NewRoleRepository(pool))
 	middleware.SetApiKeyValidator(module.Service)
+	middleware.SetUserValidator(user.Initialize(pool).Service)
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	module.SetupRoutes(engine.Group("/core/v1"))

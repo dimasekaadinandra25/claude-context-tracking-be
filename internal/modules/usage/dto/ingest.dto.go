@@ -26,10 +26,13 @@ type SessionPayload struct {
 }
 
 type HourPayload struct {
-	Hour       time.Time `json:"hour"`
-	Model      string    `json:"model"`
-	NewContext int64     `json:"new_context"`
-	Requests   int32     `json:"requests"`
+	Hour                 time.Time `json:"hour"`
+	Model                string    `json:"model"`
+	NewContext           int64     `json:"new_context"`
+	Requests             int32     `json:"requests"`
+	OutputTokens         int64     `json:"output_tokens"`
+	SubagentRequests     int32     `json:"subagent_requests"`
+	SubagentOutputTokens int64     `json:"subagent_output_tokens"`
 }
 
 type IngestResponse struct {

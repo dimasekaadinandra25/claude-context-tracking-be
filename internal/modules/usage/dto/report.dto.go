@@ -24,37 +24,49 @@ type Caller struct {
 }
 
 type PersonSummary struct {
-	UserID        string     `json:"user_id"`
-	FullName      string     `json:"full_name"`
-	Email         string     `json:"email"`
-	CurrentModel  string     `json:"current_model"`
-	NewContext    int64      `json:"new_context"`
-	Requests      int64      `json:"requests"`
-	Sessions      int64      `json:"sessions"`
-	LastRequestAt *time.Time `json:"last_request_at"`
-	LastSyncedAt  *time.Time `json:"last_synced_at"`
+	UserID               string     `json:"user_id"`
+	FullName             string     `json:"full_name"`
+	Email                string     `json:"email"`
+	CurrentModel         string     `json:"current_model"`
+	NewContext           int64      `json:"new_context"`
+	Requests             int64      `json:"requests"`
+	Sessions             int64      `json:"sessions"`
+	OutputTokens         int64      `json:"output_tokens"`
+	SubagentRequests     int64      `json:"subagent_requests"`
+	SubagentOutputTokens int64      `json:"subagent_output_tokens"`
+	LastRequestAt        *time.Time `json:"last_request_at"`
+	LastSyncedAt         *time.Time `json:"last_synced_at"`
 }
 
 type Overview struct {
-	People          []PersonSummary `json:"people"`
-	TotalNewContext int64           `json:"total_new_context"`
-	TotalRequests   int64           `json:"total_requests"`
-	TotalSessions   int64           `json:"total_sessions"`
-	ActivePeople    int64           `json:"active_people"`
+	People                    []PersonSummary `json:"people"`
+	TotalNewContext           int64           `json:"total_new_context"`
+	TotalRequests             int64           `json:"total_requests"`
+	TotalSessions             int64           `json:"total_sessions"`
+	ActivePeople              int64           `json:"active_people"`
+	TotalOutputTokens         int64           `json:"total_output_tokens"`
+	TotalSubagentRequests     int64           `json:"total_subagent_requests"`
+	TotalSubagentOutputTokens int64           `json:"total_subagent_output_tokens"`
 }
 
 type Point struct {
-	Bucket     time.Time `json:"bucket"`
-	Key        string    `json:"key"`
-	NewContext int64     `json:"new_context"`
-	Requests   int64     `json:"requests"`
+	Bucket               time.Time `json:"bucket"`
+	Key                  string    `json:"key"`
+	NewContext           int64     `json:"new_context"`
+	Requests             int64     `json:"requests"`
+	OutputTokens         int64     `json:"output_tokens"`
+	SubagentRequests     int64     `json:"subagent_requests"`
+	SubagentOutputTokens int64     `json:"subagent_output_tokens"`
 }
 
 type ModelSummary struct {
-	Model      string `json:"model"`
-	NewContext int64  `json:"new_context"`
-	Requests   int64  `json:"requests"`
-	Sessions   int64  `json:"sessions"`
+	Model                string `json:"model"`
+	NewContext           int64  `json:"new_context"`
+	Requests             int64  `json:"requests"`
+	Sessions             int64  `json:"sessions"`
+	OutputTokens         int64  `json:"output_tokens"`
+	SubagentRequests     int64  `json:"subagent_requests"`
+	SubagentOutputTokens int64  `json:"subagent_output_tokens"`
 }
 
 type SessionQuery struct {
@@ -80,8 +92,11 @@ func (q SessionQuery) Paging() (page, perPage int) {
 
 type SessionRow struct {
 	domain.Session
-	UserName string   `json:"user_name"`
-	Models   []string `json:"models"`
+	UserName             string   `json:"user_name"`
+	Models               []string `json:"models"`
+	OutputTokens         int64    `json:"output_tokens"`
+	SubagentRequests     int64    `json:"subagent_requests"`
+	SubagentOutputTokens int64    `json:"subagent_output_tokens"`
 }
 
 type SessionDetail struct {

@@ -10,7 +10,7 @@ import (
 
 	"claude-usage-server/internal/modules/usage/dto"
 	"claude-usage-server/internal/modules/usage/repository"
-	"claude-usage-server/internal/modules/usage/testdb"
+	"claude-usage-server/internal/testutil/testdb"
 )
 
 func at(s string) time.Time {
@@ -45,9 +45,12 @@ func payload(id string) dto.SessionPayload {
 
 func TestValidateRejectsBadSessions(t *testing.T) {
 	cases := map[string]func(*dto.SessionPayload){
-		"negative new_context":   func(s *dto.SessionPayload) { s.NewContext = -1 },
-		"negative hour requests": func(s *dto.SessionPayload) { s.Hours[0].Requests = -1 },
-		"hour not on the hour":   func(s *dto.SessionPayload) { s.Hours[0].Hour = at("2026-10-30T02:30:00Z") },
+		"negative new_context":            func(s *dto.SessionPayload) { s.NewContext = -1 },
+		"negative hour requests":          func(s *dto.SessionPayload) { s.Hours[0].Requests = -1 },
+		"negative output_tokens":          func(s *dto.SessionPayload) { s.Hours[0].OutputTokens = -1 },
+		"negative subagent_requests":      func(s *dto.SessionPayload) { s.Hours[0].SubagentRequests = -1 },
+		"negative subagent_output_tokens": func(s *dto.SessionPayload) { s.Hours[0].SubagentOutputTokens = -1 },
+		"hour not on the hour":            func(s *dto.SessionPayload) { s.Hours[0].Hour = at("2026-10-30T02:30:00Z") },
 		"too many hours": func(s *dto.SessionPayload) {
 			s.Hours = make([]dto.HourPayload, 2001)
 			for i := range s.Hours {

@@ -6,11 +6,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	apiKeyRepository "claude-usage-server/internal/modules/core/api_key/repository"
 	apiKeyService "claude-usage-server/internal/modules/core/api_key/service"
 	"claude-usage-server/internal/modules/core/user/dto"
 	"claude-usage-server/internal/modules/core/user/repository"
-	"claude-usage-server/internal/modules/usage/testdb"
+	"claude-usage-server/internal/testutil/testdb"
 	"claude-usage-server/pkg/crypto"
 	"claude-usage-server/pkg/keycrypt"
 )
@@ -154,5 +156,45 @@ func TestResetPasswordRevokesRefreshTokens(t *testing.T) {
 	}
 	if memberLive != 0 || otherLive != 1 {
 		t.Fatalf("live tokens member=%d other=%d, want 0 and 1", memberLive, otherLive)
+	}
+}
+
+func mustChange(t *testing.T, pool *pgxpool.Pool, id string) bool {
+	t.Helper()
+	var flag bool
+	if err := pool.QueryRow(context.Background(), `SELECT must_change_password FROM core.users WHERE id = $1`, id).Scan(&flag); err != nil {
+		t.Fatal(err)
+	}
+	return flag
+}
+
+func TestCreateMemberMustChangePassword(t *testing.T) {
+	pool := testdb.Open(t)
+	admin := testdb.User(t, pool, "boss@x.test", true)
+	users := NewUserService(repository.NewUserRepository(pool))
+
+	created, err := users.CreateMember(context.Background(), &dto.CreateUserRequest{Email: "mia@x.test", Username: "mia", Password: "Secret123!"}, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !mustChange(t, pool, created.ID) {
+		t.Fatal("new member must_change_password = false, want true")
+	}
+}
+
+func TestResetPasswordForcesChange(t *testing.T) {
+	pool := testdb.Open(t)
+	admin := testdb.User(t, pool, "boss@x.test", true)
+	member := testdb.User(t, pool, "m@x.test", false)
+	users := NewUserService(repository.NewUserRepository(pool))
+
+	if mustChange(t, pool, member) {
+		t.Fatal("precondition: member starts with must_change_password = true")
+	}
+	if err := users.ResetPassword(context.Background(), admin, member, "NewPass123!"); err != nil {
+		t.Fatal(err)
+	}
+	if !mustChange(t, pool, member) {
+		t.Fatal("after reset must_change_password = false, want true")
 	}
 }

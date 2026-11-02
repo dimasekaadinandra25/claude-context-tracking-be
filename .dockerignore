@@ -49,3 +49,5 @@ logs/
 
 # Dependencies (will be downloaded during build)
 vendor/
+
+backups/

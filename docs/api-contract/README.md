@@ -12,8 +12,7 @@ docs/api-contract/
 ├── core/
 │   ├── auth.md
 │   ├── user.md
-│   ├── role.md
-│   └── audit-logs.md
+│   └── role.md
 └── usage/
     └── README.md
 ```
@@ -22,7 +21,7 @@ docs/api-contract/
 
 ## Core Module
 
-Sign-in, the signed-in user's profile, roles, API keys and audit logs.
+Sign-in, the signed-in user's profile, roles and API keys.
 
 **Base Path:** `/core/v1`
 
@@ -31,7 +30,6 @@ Sign-in, the signed-in user's profile, roles, API keys and audit logs.
 | [auth.md](core/auth.md) | 6 | Sign in, refresh, logout, me, change password |
 | [user.md](core/user.md) | 4 | Own profile and password, user by ID |
 | [role.md](core/role.md) | 6 | Role CRUD and permissions |
-| [audit-logs.md](core/audit-logs.md) | 1 | Audit log list (`super_admin`) |
 
 ---
 

@@ -23,6 +23,8 @@ make run                       # API on 127.0.0.1:8080
 make dev                       # hot reload (air)
 make build                     # bin/claude-usage-server
 make down                      # stop the stack
+make backup                    # gzip pg_dump of claude_usage into ./backups now
+make restore FILE=backups/x.sql.gz RESTORE_CONFIRM=yes   # replace claude_usage with a dump (one transaction)
 ```
 
 Seeded admin: `admin@claude-usage.local` / `<SEED_ADMIN_PASSWORD>` (`SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`).
@@ -49,7 +51,7 @@ make test-db                                     # create/migrate/seed claude_us
 TEST_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/claude_usage_test?sslmode=disable" go test -count=1 ./...
 ```
 
-Tests that create API keys must `t.Setenv(keycrypt.EnvName, ...)` with 64 hex chars. DB tests use `internal/modules/usage/testdb`: `Open(t)` skips without `TEST_DATABASE_URL`, takes a Postgres advisory lock so packages don't race, truncates `usage.*` and `core.api_keys`, and deletes every user except `admin`. `User(t, pool, email, admin)` creates a member or super admin. Never point it at `claude_usage`.
+Route-level tests that use `JWTAuth` must call `middleware.SetUserValidator(...)` (it fails closed), or use `router.Setup` as `internal/router/router_test.go` does. Tests that create API keys must `t.Setenv(keycrypt.EnvName, ...)` with 64 hex chars. DB tests use `internal/testutil/testdb`: `Open(t)` skips without `TEST_DATABASE_URL`, takes a Postgres advisory lock so packages don't race, truncates `usage.*` and `core.api_keys`, and deletes every user except `admin`. `User(t, pool, email, admin)` creates a member or super admin. Never point it at `claude_usage`.
 
 ## Architecture
 
@@ -64,7 +66,7 @@ internal/
 │   │   ├── role/        # roles and permission levels
 │   │   └── api_key/     # self-service /api-keys, /admin/users/:id/api-keys, /admin/api-keys/:id/revoke|reveal
 │   └── usage/           # ingest + reports (/usage/v1)
-├── shared/              # audit, authz, query builder, response envelope
+├── shared/              # authz, query builder, response envelope
 ├── middleware/          # JWTAuth (JWT or X-API-Key), RequireRole, RequirePermission, RejectApiKey
 └── router/router.go     # module wiring and route registration
 ```
@@ -85,7 +87,7 @@ Full contract: `docs/api-contract/`.
 ### Usage data
 
 - `usage.sessions`: one row per Claude Code session, latest absolute values.
-- `usage.session_hours`: `(session_id, hour, model)` → `new_context`, `requests`; `hour` is a whole UTC hour; `user_id` copied for join-free range queries.
+- `usage.session_hours`: `(session_id, hour, model)` → `new_context`, `requests`, `output_tokens`, `subagent_requests`, `subagent_output_tokens` (the last three optional on ingest, default 0); `hour` is a whole UTC hour; `user_id` copied for join-free range queries.
 - Ingest is an idempotent upsert of absolute values. Each session is one transaction. A `session_id` owned by another user is rejected without touching the owner's data.
 - Reads are scoped in the service: non-admins always get `user_id` forced to themselves. Default `tz` is `Asia/Jakarta`; default range is the last 7 days.
 
@@ -94,7 +96,10 @@ Full contract: `docs/api-contract/`.
 - Roles are level-based JSON permissions on `core.roles`. `super_admin` bypasses all checks; `member` has `{"usage":"viewer"}`.
 - Permission checks read Postgres through `internal/shared/authz` (no cache).
 - API keys are `wiz_<env>_<key_id>_<secret>`; validation uses only the SHA-256 of the secret (`secret_hash`). The full key is also stored AES-256-GCM encrypted (`secret_encrypted`, `pkg/keycrypt`, key `API_KEY_ENCRYPTION_KEY` = 64 hex chars, startup fails if invalid) so admins can copy it via `GET /core/v1/admin/api-keys/:id/reveal` (410 inactive, 409 issued before reveal existed). Rotating `API_KEY_ENCRYPTION_KEY` makes existing keys un-revealable; they still work. A key fails if revoked, expired, or its owner is inactive (`"user is inactive"`).
-- Deactivating a user revokes all their keys; sign-in and refresh already refuse inactive users. Issued access tokens live until `JWT_EXPIRATION`.
+- Deactivating a user revokes all their keys; sign-in and refresh refuse inactive users, and `JWTAuth` checks `core.users` by primary key on every Bearer request (`middleware.SetUserValidator(userModule.Service)`), so issued tokens of inactive or deleted users get 401 `User account is not active`.
+- API key auth failures all return 401 `Invalid API key`; the reason is only logged. The secret hash is compared with `crypto/subtle`.
+- `core.users.must_change_password` is set for admin-created members, admin password resets and the seeded admin, cleared by any password change, and returned as `user.must_change_password` by sign-in and `/auth/me`. The dashboard enforces it; the server does not block other routes.
+- `POST /usage/v1/sessions` bodies are capped at 64 MB (413). `:id` routes return 404 for non-UUID or unknown ids.
 
 ## Conventions
 

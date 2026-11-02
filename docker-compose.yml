@@ -28,6 +28,36 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  backup:
+    image: postgres:17-alpine
+    environment:
+      PGHOST: postgres
+      PGUSER: postgres
+      PGPASSWORD: ${DB_PASSWORD:-postgres}
+      PGDATABASE: claude_usage
+      TZ: UTC
+    volumes: ["./backups:/backups"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -o pipefail
+        while true; do
+          f=/backups/claude_usage-$$(date +%Y%m%d-%H%M%S).sql.gz
+          if pg_dump --clean --if-exists | gzip > "$$f.tmp"; then
+            mv "$$f.tmp" "$$f"
+            echo "backup written: $$f"
+          else
+            rm -f "$$f.tmp"
+            echo "backup failed" >&2
+          fi
+          find /backups -name 'claude_usage-*.sql.gz' -mmin +20160 -delete
+          sleep 86400
+        done
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   dashboard:
     build: ../claude-usage-dashboard
     ports: ["127.0.0.1:3000:80"]

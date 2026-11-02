@@ -72,6 +72,9 @@ func (s *Service) Overview(ctx context.Context, c dto.Caller, q dto.ReportQuery)
 		ov.TotalNewContext += p.NewContext
 		ov.TotalRequests += p.Requests
 		ov.TotalSessions += p.Sessions
+		ov.TotalOutputTokens += p.OutputTokens
+		ov.TotalSubagentRequests += p.SubagentRequests
+		ov.TotalSubagentOutputTokens += p.SubagentOutputTokens
 		if p.NewContext > 0 {
 			ov.ActivePeople++
 		}

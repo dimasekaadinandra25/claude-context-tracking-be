@@ -42,10 +42,10 @@ func userFilter(userID string) any {
 	return userID
 }
 
-func sessionColumns(newContext string) string {
+func sessionColumns(newContext, extra string) string {
 	return `
 	s.id, s.user_id::text, s.machine, s.project, s.title, s.model,
-	s.context_window, s.start_context, s.latest_context, s.peak_context, ` + newContext + `,
+	s.context_window, s.start_context, s.latest_context, s.peak_context, ` + newContext + `, ` + extra + `,
 	s.requests, s.compactions, s.first_request_at, s.last_request_at, s.last_reported_at,
 	COALESCE(NULLIF(u.full_name, ''), u.username),
 	COALESCE((
@@ -63,6 +63,7 @@ func scanSession(row pgx.Row) (dto.SessionRow, error) {
 	err := row.Scan(
 		&s.ID, &s.UserID, &s.Machine, &s.Project, &s.Title, &s.Model,
 		&s.ContextWindow, &s.StartContext, &s.LatestContext, &s.PeakContext, &s.NewContext,
+		&r.OutputTokens, &r.SubagentRequests, &r.SubagentOutputTokens,
 		&s.Requests, &s.Compactions, &s.FirstRequestAt, &s.LastRequestAt, &s.LastReportedAt,
 		&r.UserName, &r.Models,
 	)
@@ -75,13 +76,17 @@ func (r *Repository) Overview(ctx context.Context, q dto.ReportQuery) ([]dto.Per
 			SELECT user_id,
 			       SUM(new_context)::bigint AS new_context,
 			       SUM(requests)::bigint AS requests,
-			       COUNT(DISTINCT session_id) AS sessions
+			       COUNT(DISTINCT session_id) AS sessions,
+			       SUM(output_tokens)::bigint AS output_tokens,
+			       SUM(subagent_requests)::bigint AS subagent_requests,
+			       SUM(subagent_output_tokens)::bigint AS subagent_output_tokens
 			FROM usage.session_hours
 			WHERE hour >= $1 AND hour < $2 AND ($3::uuid IS NULL OR user_id = $3::uuid)
 			GROUP BY user_id
 		)
 		SELECT u.id::text, COALESCE(u.full_name, ''), u.email, COALESCE(ls.model, ''),
 		       COALESCE(h.new_context, 0), COALESCE(h.requests, 0), COALESCE(h.sessions, 0),
+		       COALESCE(h.output_tokens, 0), COALESCE(h.subagent_requests, 0), COALESCE(h.subagent_output_tokens, 0),
 		       ls.last_request_at, k.last_used_at
 		FROM core.users u
 		LEFT JOIN h ON h.user_id = u.id
@@ -101,7 +106,8 @@ func (r *Repository) Overview(ctx context.Context, q dto.ReportQuery) ([]dto.Per
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (dto.PersonSummary, error) {
 		var p dto.PersonSummary
 		err := row.Scan(&p.UserID, &p.FullName, &p.Email, &p.CurrentModel,
-			&p.NewContext, &p.Requests, &p.Sessions, &p.LastRequestAt, &p.LastSyncedAt)
+			&p.NewContext, &p.Requests, &p.Sessions,
+			&p.OutputTokens, &p.SubagentRequests, &p.SubagentOutputTokens, &p.LastRequestAt, &p.LastSyncedAt)
 		return p, err
 	})
 }
@@ -109,7 +115,8 @@ func (r *Repository) Overview(ctx context.Context, q dto.ReportQuery) ([]dto.Per
 func (r *Repository) Timeseries(ctx context.Context, q dto.ReportQuery, interval, groupBy string) ([]dto.Point, error) {
 	rows, err := r.db.Query(ctx, fmt.Sprintf(`
 		SELECT date_trunc($1, hour, $2) AS bucket, %s AS key,
-		       SUM(new_context)::bigint, SUM(requests)::bigint
+		       SUM(new_context)::bigint, SUM(requests)::bigint,
+		       SUM(output_tokens)::bigint, SUM(subagent_requests)::bigint, SUM(subagent_output_tokens)::bigint
 		FROM usage.session_hours
 		WHERE hour >= $3 AND hour < $4 AND ($5::uuid IS NULL OR user_id = $5::uuid)
 		GROUP BY 1, 2
@@ -120,14 +127,15 @@ func (r *Repository) Timeseries(ctx context.Context, q dto.ReportQuery, interval
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (dto.Point, error) {
 		var p dto.Point
-		err := row.Scan(&p.Bucket, &p.Key, &p.NewContext, &p.Requests)
+		err := row.Scan(&p.Bucket, &p.Key, &p.NewContext, &p.Requests, &p.OutputTokens, &p.SubagentRequests, &p.SubagentOutputTokens)
 		return p, err
 	})
 }
 
 func (r *Repository) Models(ctx context.Context, q dto.ReportQuery) ([]dto.ModelSummary, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT model, SUM(new_context)::bigint, SUM(requests)::bigint, COUNT(DISTINCT session_id)
+		SELECT model, SUM(new_context)::bigint, SUM(requests)::bigint, COUNT(DISTINCT session_id),
+		       SUM(output_tokens)::bigint, SUM(subagent_requests)::bigint, SUM(subagent_output_tokens)::bigint
 		FROM usage.session_hours
 		WHERE hour >= $1 AND hour < $2 AND ($3::uuid IS NULL OR user_id = $3::uuid)
 		GROUP BY model
@@ -138,7 +146,7 @@ func (r *Repository) Models(ctx context.Context, q dto.ReportQuery) ([]dto.Model
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (dto.ModelSummary, error) {
 		var m dto.ModelSummary
-		err := row.Scan(&m.Model, &m.NewContext, &m.Requests, &m.Sessions)
+		err := row.Scan(&m.Model, &m.NewContext, &m.Requests, &m.Sessions, &m.OutputTokens, &m.SubagentRequests, &m.SubagentOutputTokens)
 		return m, err
 	})
 }
@@ -148,10 +156,13 @@ func (r *Repository) Sessions(ctx context.Context, q dto.SessionQuery, limit, of
 		FROM usage.sessions s
 		JOIN core.users u ON u.id = s.user_id
 		JOIN LATERAL (
-			SELECT SUM(h.new_context) AS new_context
+			SELECT SUM(h.new_context) AS new_context,
+			       SUM(h.output_tokens)::bigint AS output_tokens,
+			       SUM(h.subagent_requests)::bigint AS subagent_requests,
+			       SUM(h.subagent_output_tokens)::bigint AS subagent_output_tokens
 			FROM usage.session_hours h
 			WHERE h.session_id = s.id AND h.hour >= $1 AND h.hour < $2
-		) g ON g.new_context > 0
+		) g ON g.new_context > 0 OR g.output_tokens > 0 OR g.subagent_requests > 0
 		WHERE ($3::uuid IS NULL OR s.user_id = $3::uuid)
 		  AND ($4 = '' OR s.project = $4)
 		  AND ($5 = '' OR s.model = $5 OR EXISTS (
@@ -164,7 +175,7 @@ func (r *Repository) Sessions(ctx context.Context, q dto.SessionQuery, limit, of
 		return nil, 0, err
 	}
 	rows, err := r.db.Query(ctx,
-		`SELECT `+sessionColumns("g.new_context")+where+` ORDER BY `+sessionOrders[q.Sort]+` LIMIT $7 OFFSET $8`,
+		`SELECT `+sessionColumns("g.new_context", "g.output_tokens, g.subagent_requests, g.subagent_output_tokens")+where+` ORDER BY `+sessionOrders[q.Sort]+` LIMIT $7 OFFSET $8`,
 		append(args, limit, offset)...)
 	if err != nil {
 		return nil, 0, err
@@ -177,7 +188,7 @@ func (r *Repository) Sessions(ctx context.Context, q dto.SessionQuery, limit, of
 
 func (r *Repository) Session(ctx context.Context, id string) (dto.SessionDetail, error) {
 	found, err := scanSession(r.db.QueryRow(ctx, `
-		SELECT `+sessionColumns("s.new_context")+`
+		SELECT `+sessionColumns("s.new_context", "0::bigint, 0::bigint, 0::bigint")+`
 		FROM usage.sessions s
 		JOIN core.users u ON u.id = s.user_id
 		WHERE s.id = $1`, id))
@@ -188,7 +199,7 @@ func (r *Repository) Session(ctx context.Context, id string) (dto.SessionDetail,
 		return dto.SessionDetail{}, err
 	}
 	rows, err := r.db.Query(ctx, `
-		SELECT hour, model, new_context, requests
+		SELECT hour, model, new_context, requests, output_tokens, subagent_requests, subagent_output_tokens
 		FROM usage.session_hours
 		WHERE session_id = $1
 		ORDER BY hour, model`, id)
@@ -197,7 +208,7 @@ func (r *Repository) Session(ctx context.Context, id string) (dto.SessionDetail,
 	}
 	hours, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.HourUsage, error) {
 		var h domain.HourUsage
-		err := row.Scan(&h.Hour, &h.Model, &h.NewContext, &h.Requests)
+		err := row.Scan(&h.Hour, &h.Model, &h.NewContext, &h.Requests, &h.OutputTokens, &h.SubagentRequests, &h.SubagentOutputTokens)
 		return h, err
 	})
 	return dto.SessionDetail{Session: found.Session, UserName: found.UserName, Models: found.Models, Hours: hours}, err

@@ -3,7 +3,7 @@
 **Version:** v1
 **Base URL:** `/core/v1/auth`
 **Module:** Core Authentication
-**Last Updated:** 2026-10-30
+**Last Updated:** 2026-11-02
 
 ---
 
@@ -15,7 +15,8 @@ Sign-in for the dashboard. JWT access token plus a rotating refresh token. There
 - JWT access token (default 24h) and opaque refresh token (default 7 days) with rotation
 - Multi-device sessions, logout from one or all devices
 - Account lockout after `MAX_LOGIN_ATTEMPTS` failed sign-ins (default 5) for `ACCOUNT_LOCKOUT_DURATION` (default 30m)
-- Deactivated users cannot sign in or refresh
+- Deactivated or deleted users cannot sign in or refresh, and their access tokens stop working on the next request
+- `user.must_change_password` tells the dashboard to force a password change (new members, admin password resets, the seeded admin)
 
 ---
 
@@ -107,7 +108,8 @@ POST /core/v1/auth/signin
       "id": "d6cb9822-0d8e-4361-9e47-97ef72633428",
       "email": "mia@claude-usage.local",
       "username": "mia",
-      "full_name": "Mia"
+      "full_name": "Mia",
+      "must_change_password": true
     },
     "roles": ["member"],
     "permissions": ["usage:read"]
@@ -121,6 +123,7 @@ POST /core/v1/auth/signin
 | `access_token` | Send as `Authorization: Bearer <token>` |
 | `refresh_token` | Store securely; exchange at `/refresh` |
 | `expires_in` | Access token lifetime in seconds |
+| `user.must_change_password` | `true` for a member an admin created or whose password an admin reset, and for the seeded admin. Cleared by [6. Change Password](#6-change-password) (or `PUT /core/v1/users/me/password`). The server only reports it; the dashboard sends the user to change their password |
 | `roles` | Role codes |
 | `permissions` | Flat permission list. Empty or `null` for `super_admin`, who bypasses permission checks |
 
@@ -230,7 +233,8 @@ GET /core/v1/auth/me
       "id": "b61e8255-5aef-42a3-8fdc-8c191295af10",
       "email": "admin@claude-usage.local",
       "username": "admin",
-      "full_name": "Administrator"
+      "full_name": "Administrator",
+      "must_change_password": false
     },
     "roles": ["super_admin"],
     "permissions": [],
@@ -240,7 +244,9 @@ GET /core/v1/auth/me
 }
 ```
 
-**Errors:** 401 `User not active`.
+`user.must_change_password` is read live from the database, as in sign-in.
+
+**Errors:** 401 `User account is not active`.
 
 ---
 
@@ -260,7 +266,7 @@ POST /core/v1/auth/change-password
 }
 ```
 
-`new_password` is min 8 characters.
+`new_password` is min 8 characters. A successful change sets `must_change_password` to `false`.
 
 **Response (200):**
 ```json
@@ -285,4 +291,4 @@ POST /core/v1/auth/change-password
 | Access | 24h | `JWT_EXPIRATION` |
 | Refresh | 168h | `JWT_REFRESH_EXPIRATION` |
 
-Deactivating a user blocks sign-in and refresh immediately. An access token already issued stays valid until it expires.
+Every JWT request checks the user in the database. Deactivating or deleting a user blocks sign-in and refresh, and their already issued access tokens get 401 `User account is not active` on the next request.

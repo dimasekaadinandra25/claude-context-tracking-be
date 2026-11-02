@@ -25,6 +25,16 @@ func SetApiKeyValidator(v ApiKeyValidator) {
 	apiKeyValidator = v
 }
 
+type UserValidator interface {
+	IsActiveUser(ctx context.Context, userID string) (bool, error)
+}
+
+var userValidator UserValidator
+
+func SetUserValidator(v UserValidator) {
+	userValidator = v
+}
+
 // JWTAuth is a middleware that validates JWT tokens or API keys
 func JWTAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -80,6 +90,11 @@ func JWTAuth() gin.HandlerFunc {
 			return
 		}
 
+		if !activeUser(c, claims.UserID) {
+			c.Abort()
+			return
+		}
+
 		// Store claims in context for later use
 		SetUserContext(c, claims)
 		SetAuthType(c, "jwt")
@@ -93,13 +108,33 @@ func JWTAuth() gin.HandlerFunc {
 	}
 }
 
+func activeUser(c *gin.Context, userID string) bool {
+	if userValidator == nil {
+		logger.Warn("JWT authentication attempted but no user validator is configured")
+		response.Error(c, http.StatusUnauthorized, "Unauthorized", "JWT authentication is not configured")
+		return false
+	}
+	active, err := userValidator.IsActiveUser(c.Request.Context(), userID)
+	if err != nil {
+		logger.Error("Failed to check user status", logger.String("user_id", userID), logger.Err(err))
+		response.Error(c, http.StatusInternalServerError, "Internal server error", "")
+		return false
+	}
+	if !active {
+		logger.Warn("Token of inactive user rejected", logger.String("user_id", userID))
+		response.Error(c, http.StatusUnauthorized, "User account is not active", "")
+		return false
+	}
+	return true
+}
+
 // handleApiKeyAuth handles API key authentication
 // Returns true if authentication was successful, false otherwise
 func handleApiKeyAuth(c *gin.Context, apiKey string) bool {
 	// Check if validator is set
 	if apiKeyValidator == nil {
 		logger.Warn("API key authentication attempted but no validator is configured")
-		response.Error(c, http.StatusUnauthorized, "Unauthorized", "API key authentication is not configured")
+		response.Error(c, http.StatusUnauthorized, "Invalid API key", "")
 		return false
 	}
 
@@ -107,7 +142,7 @@ func handleApiKeyAuth(c *gin.Context, apiKey string) bool {
 	parts := strings.Split(apiKey, "_")
 	if len(parts) != 4 || parts[0] != "wiz" {
 		logger.Warn("Invalid API key format")
-		response.Error(c, http.StatusUnauthorized, "Unauthorized", "Invalid API key format")
+		response.Error(c, http.StatusUnauthorized, "Invalid API key", "")
 		return false
 	}
 
@@ -122,7 +157,7 @@ func handleApiKeyAuth(c *gin.Context, apiKey string) bool {
 			logger.String("key_id", keyID),
 			logger.Err(err),
 		)
-		response.Error(c, http.StatusUnauthorized, "Unauthorized", err.Error())
+		response.Error(c, http.StatusUnauthorized, "Invalid API key", "")
 		return false
 	}
 

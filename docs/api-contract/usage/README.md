@@ -3,7 +3,7 @@
 **Version:** v1
 **Base URLs:** `/usage/v1` (ingest and reports), `/core/v1/admin` (user and API key administration)
 **Module:** Usage
-**Last Updated:** 2026-10-30
+**Last Updated:** 2026-11-02
 
 ---
 
@@ -75,7 +75,9 @@ Errors:
 | `GET /usage/v1/...` | `Authorization: Bearer <access_token>` | An API key is refused with 403 |
 | `/core/v1/admin/...` | `Authorization: Bearer <access_token>` of a `super_admin` | Members get 403, API keys get 403 |
 
-An API key stops working (401) when it is revoked, expired, or its owner is deactivated.
+An API key stops working (401) when it is revoked, expired, or its owner is deactivated. A JWT stops working (401 `User account is not active`) on the next request after its user is deactivated or deleted.
+
+Every route with an `:id` returns 404 for an unknown id or one that is not a UUID.
 
 ---
 
@@ -133,8 +135,8 @@ POST /usage/v1/sessions
       "first_at": "2026-10-30T02:11:09.123Z",
       "latest_at": "2026-10-30T06:58:40.456Z",
       "hours": [
-        { "hour": "2026-10-30T02:00:00Z", "model": "claude-opus-5-5", "new_context": 40000, "requests": 120 },
-        { "hour": "2026-10-30T06:00:00Z", "model": "claude-sonnet-5-5", "new_context": 8000, "requests": 30 }
+        { "hour": "2026-10-30T02:00:00Z", "model": "claude-opus-5-5", "new_context": 40000, "requests": 120, "output_tokens": 15000, "subagent_requests": 4, "subagent_output_tokens": 6000 },
+        { "hour": "2026-10-30T06:00:00Z", "model": "claude-sonnet-5-5", "new_context": 8000, "requests": 30, "output_tokens": 2500, "subagent_requests": 0, "subagent_output_tokens": 0 }
       ]
     }
   ]
@@ -164,6 +166,11 @@ POST /usage/v1/sessions
 | `hours[].model` | string | Yes | 1-100 characters |
 | `hours[].new_context` | int | No | Growth in that hour for that model, ≥ 0 |
 | `hours[].requests` | int | No | ≥ 0 |
+| `hours[].output_tokens` | int | No | Output tokens in that hour for that model, ≥ 0. Missing = 0 |
+| `hours[].subagent_requests` | int | No | Subagent (sidechain) requests in that hour for that model, ≥ 0. Missing = 0 |
+| `hours[].subagent_output_tokens` | int | No | Output tokens of those subagent requests, ≥ 0. Missing = 0 |
+
+The body may be at most 64 MB.
 
 **Behaviour:**
 - Values are **absolute**. The session row and each `(session_id, hour, model)` row are replaced, never added to. Sending the same payload twice leaves the totals unchanged.
@@ -202,8 +209,10 @@ Rejection reasons: `session_id must be 1-100 characters`, `model must be 1-100 c
 | Status | Message | When |
 |--------|---------|------|
 | 400 | Invalid request payload | Bad JSON, missing `machine`, or more than 200 sessions |
-| 401 | Unauthorized | Missing or invalid key, revoked key (`API key has been revoked`), owner deactivated (`user is inactive`) |
+| 401 | Unauthorized | No `X-API-Key` and no JWT |
+| 401 | Invalid API key | Malformed, unknown, revoked or expired key, or owner deactivated. The reason is only logged on the server |
 | 403 | Forbidden | Called with a JWT instead of an API key |
+| 413 | Request body too large | Body over 64 MB |
 | 500 | Internal server error | Database failure. Nothing is reported as accepted; the app keeps its watermark and resends |
 
 ---
@@ -219,7 +228,9 @@ Reports 2-5 accept these query parameters:
 | `tz` | IANA name | `Asia/Jakarta` | Used for day buckets. Unknown names return 400 |
 | `user_id` | UUID | none (everyone) | **Admins only.** For members it is ignored and forced to their own ID |
 
-Ranges filter on the UTC hour of each request (`session_hours.hour`), except the session list, which filters on `last_request_at`.
+Ranges filter on the UTC hour of each request (`session_hours.hour`).
+
+Write `from` and `to` in UTC with a `Z` suffix (`2026-10-29T00:00:00Z`). An offset such as `+07:00` must be URL-encoded as `%2B07:00`; a raw `+` in a query string is read as a space and the request fails with 400.
 
 ---
 
@@ -246,6 +257,9 @@ GET /usage/v1/overview?from=2026-10-29T00:00:00Z&to=2026-10-31T00:00:00Z&tz=Asia
         "new_context": 48000,
         "requests": 150,
         "sessions": 1,
+        "output_tokens": 17500,
+        "subagent_requests": 4,
+        "subagent_output_tokens": 6000,
         "last_request_at": "2026-10-30T06:58:40.456Z",
         "last_synced_at": "2026-10-30T04:18:58.36942Z"
       },
@@ -257,6 +271,9 @@ GET /usage/v1/overview?from=2026-10-29T00:00:00Z&to=2026-10-31T00:00:00Z&tz=Asia
         "new_context": 0,
         "requests": 0,
         "sessions": 0,
+        "output_tokens": 0,
+        "subagent_requests": 0,
+        "subagent_output_tokens": 0,
         "last_request_at": null,
         "last_synced_at": null
       }
@@ -264,7 +281,10 @@ GET /usage/v1/overview?from=2026-10-29T00:00:00Z&to=2026-10-31T00:00:00Z&tz=Asia
     "total_new_context": 48000,
     "total_requests": 150,
     "total_sessions": 1,
-    "active_people": 1
+    "active_people": 1,
+    "total_output_tokens": 17500,
+    "total_subagent_requests": 4,
+    "total_subagent_output_tokens": 6000
   },
   "message": "Overview retrieved"
 }
@@ -272,7 +292,8 @@ GET /usage/v1/overview?from=2026-10-29T00:00:00Z&to=2026-10-31T00:00:00Z&tz=Asia
 
 | Field | Notes |
 |-------|-------|
-| `new_context`, `requests` | Sums of the hour rows in the range |
+| `new_context`, `requests`, `output_tokens`, `subagent_requests`, `subagent_output_tokens` | Sums of the hour rows in the range |
+| `total_*` | Sums over `people` |
 | `sessions` | Sessions with at least one hour row in the range |
 | `current_model`, `last_request_at` | From the person's most recent session overall |
 | `last_synced_at` | Latest `last_used_at` across the person's API keys |
@@ -284,7 +305,7 @@ A member gets a single entry: themselves.
 
 ### 3. Timeseries
 
-Buckets of `SUM(new_context)` and `SUM(requests)`.
+Buckets of `SUM(new_context)`, `SUM(requests)`, `SUM(output_tokens)`, `SUM(subagent_requests)` and `SUM(subagent_output_tokens)`.
 
 ```
 GET /usage/v1/timeseries?interval=day&group_by=model&from=...&to=...&tz=Asia/Jakarta
@@ -301,8 +322,8 @@ GET /usage/v1/timeseries?interval=day&group_by=model&from=...&to=...&tz=Asia/Jak
 ```json
 {
   "data": [
-    { "bucket": "2026-10-30T00:00:00+07:00", "key": "claude-opus-5-5", "new_context": 40000, "requests": 120 },
-    { "bucket": "2026-10-30T00:00:00+07:00", "key": "claude-sonnet-5-5", "new_context": 8000, "requests": 30 }
+    { "bucket": "2026-10-30T00:00:00+07:00", "key": "claude-opus-5-5", "new_context": 40000, "requests": 120, "output_tokens": 15000, "subagent_requests": 4, "subagent_output_tokens": 6000 },
+    { "bucket": "2026-10-30T00:00:00+07:00", "key": "claude-sonnet-5-5", "new_context": 8000, "requests": 30, "output_tokens": 2500, "subagent_requests": 0, "subagent_output_tokens": 0 }
   ],
   "message": "Timeseries retrieved"
 }
@@ -328,8 +349,8 @@ GET /usage/v1/models?from=...&to=...
 ```json
 {
   "data": [
-    { "model": "claude-opus-5-5", "new_context": 40000, "requests": 120, "sessions": 1 },
-    { "model": "claude-sonnet-5-5", "new_context": 8000, "requests": 30, "sessions": 1 }
+    { "model": "claude-opus-5-5", "new_context": 40000, "requests": 120, "sessions": 1, "output_tokens": 15000, "subagent_requests": 4, "subagent_output_tokens": 6000 },
+    { "model": "claude-sonnet-5-5", "new_context": 8000, "requests": 30, "sessions": 1, "output_tokens": 2500, "subagent_requests": 0, "subagent_output_tokens": 0 }
   ],
   "message": "Models retrieved"
 }
@@ -339,7 +360,7 @@ GET /usage/v1/models?from=...&to=...
 
 ### 5. Session List
 
-Paged `usage.sessions` rows with the owner's name. Only sessions that grew inside the range are listed.
+Paged `usage.sessions` rows with the owner's name. Only sessions with activity inside the range are listed.
 
 ```
 GET /usage/v1/sessions?from=...&to=...&project=&model=&q=&page=1&per_page=25&sort=-last_request_at
@@ -378,7 +399,10 @@ GET /usage/v1/sessions?from=...&to=...&project=&model=&q=&page=1&per_page=25&sor
       "last_request_at": "2026-10-30T06:58:40.456Z",
       "last_reported_at": "2026-10-30T04:18:58.372578Z",
       "user_name": "Mia",
-      "models": ["claude-opus-5-5", "claude-sonnet-5-5"]
+      "models": ["claude-opus-5-5", "claude-sonnet-5-5"],
+      "output_tokens": 17500,
+      "subagent_requests": 4,
+      "subagent_output_tokens": 6000
     }
   ],
   "message": "Sessions retrieved",
@@ -388,7 +412,7 @@ GET /usage/v1/sessions?from=...&to=...&project=&model=&q=&page=1&per_page=25&sor
 }
 ```
 
-`new_context` here is the session's growth inside the range (sum of its hour rows with `hour` in `[from, to)`), and sorting by `new_context` uses that value. Sessions with no growth in the range are left out. `requests` and the context fields are the session's lifetime values. `GET /usage/v1/sessions/:id` returns the lifetime `new_context`.
+`new_context`, `output_tokens`, `subagent_requests` and `subagent_output_tokens` here are sums of the session's hour rows with `hour` in `[from, to)`, and sorting by `new_context` uses that value. A session is listed when, in the range, `new_context > 0`, `output_tokens > 0` or `subagent_requests > 0`. `requests` and the context fields are the session's lifetime values. `GET /usage/v1/sessions/:id` returns the lifetime `new_context`.
 
 `model` is the session's current model. `models` lists every model the session used: the distinct models of its hour rows, ordered by their summed `new_context` (largest first), then by name. A session with no hour rows gets `[model]`.
 
@@ -429,8 +453,8 @@ GET /usage/v1/sessions/:id
     "user_name": "Mia",
     "models": ["claude-opus-5-5", "claude-sonnet-5-5"],
     "hours": [
-      { "hour": "2026-10-30T02:00:00Z", "model": "claude-opus-5-5", "new_context": 40000, "requests": 120 },
-      { "hour": "2026-10-30T06:00:00Z", "model": "claude-sonnet-5-5", "new_context": 8000, "requests": 30 }
+      { "hour": "2026-10-30T02:00:00Z", "model": "claude-opus-5-5", "new_context": 40000, "requests": 120, "output_tokens": 15000, "subagent_requests": 4, "subagent_output_tokens": 6000 },
+      { "hour": "2026-10-30T06:00:00Z", "model": "claude-sonnet-5-5", "new_context": 8000, "requests": 30, "output_tokens": 2500, "subagent_requests": 0, "subagent_output_tokens": 0 }
     ]
   },
   "message": "Session retrieved"
@@ -479,7 +503,7 @@ All under `/core/v1/admin`, JWT of a `super_admin`.
 
 ### 8. Create User
 
-Creates a user with the `member` role.
+Creates a user with the `member` role and `must_change_password = true`, so the dashboard asks them to pick their own password at first sign-in.
 
 ```
 POST /core/v1/admin/users
@@ -587,7 +611,7 @@ POST /core/v1/admin/users/:id/deactivate
 { "data": null, "message": "User deactivated successfully" }
 ```
 
-After this, the user's keys return 401 on ingest, and sign-in and token refresh return 401 `User account is not active`. An access token issued before deactivation keeps working until it expires (`JWT_EXPIRATION`, default 24h).
+After this, the user's keys return 401 on ingest, and sign-in, token refresh and any access token issued before deactivation return 401 `User account is not active`.
 
 **Errors:** 400 `Cannot deactivate yourself`, 404 `User not found`.
 
@@ -621,7 +645,7 @@ POST /core/v1/admin/users/:id/reset-password
 { "password": "Reset1234!" }
 ```
 
-`password` is required, min 8 characters.
+`password` is required, min 8 characters. Sets `must_change_password = true` and revokes the user's refresh tokens.
 
 **Response (200):**
 ```json
@@ -703,6 +727,8 @@ GET /core/v1/admin/users/:id/api-keys?page=1&limit=20&is_active=true
 ```
 
 Revoked keys have `is_active: false` and a `revoked_at` timestamp.
+
+**Errors:** 404 `User not found` (unknown user or not a UUID).
 
 ---
 

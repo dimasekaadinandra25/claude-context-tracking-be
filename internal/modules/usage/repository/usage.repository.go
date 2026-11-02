@@ -45,9 +45,10 @@ const upsertSession = `
 	RETURNING id`
 
 const insertHours = `
-	INSERT INTO usage.session_hours (session_id, hour, model, user_id, new_context, requests)
-	SELECT $1, h.hour, h.model, $6, h.new_context, h.requests
-	FROM unnest($2::timestamptz[], $3::text[], $4::bigint[], $5::int[]) AS h(hour, model, new_context, requests)
+	INSERT INTO usage.session_hours (session_id, hour, model, user_id, new_context, requests, output_tokens, subagent_requests, subagent_output_tokens)
+	SELECT $1, h.hour, h.model, $6, h.new_context, h.requests, h.output_tokens, h.subagent_requests, h.subagent_output_tokens
+	FROM unnest($2::timestamptz[], $3::text[], $4::bigint[], $5::int[], $7::bigint[], $8::int[], $9::bigint[])
+		AS h(hour, model, new_context, requests, output_tokens, subagent_requests, subagent_output_tokens)
 	ON CONFLICT (session_id, hour, model) DO NOTHING`
 
 func (r *Repository) SaveSession(ctx context.Context, s domain.Session, hours []domain.HourUsage) (bool, error) {
@@ -77,10 +78,14 @@ func (r *Repository) SaveSession(ctx context.Context, s domain.Session, hours []
 	models := make([]string, len(hours))
 	newContext := make([]int64, len(hours))
 	requests := make([]int32, len(hours))
+	output := make([]int64, len(hours))
+	subRequests := make([]int32, len(hours))
+	subOutput := make([]int64, len(hours))
 	for i, h := range hours {
 		at[i], models[i], newContext[i], requests[i] = h.Hour, h.Model, h.NewContext, h.Requests
+		output[i], subRequests[i], subOutput[i] = h.OutputTokens, h.SubagentRequests, h.SubagentOutputTokens
 	}
-	if _, err := tx.Exec(ctx, insertHours, s.ID, at, models, newContext, requests, s.UserID); err != nil {
+	if _, err := tx.Exec(ctx, insertHours, s.ID, at, models, newContext, requests, s.UserID, output, subRequests, subOutput); err != nil {
 		return false, err
 	}
 	return true, tx.Commit(ctx)

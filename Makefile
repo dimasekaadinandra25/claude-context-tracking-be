@@ -1,4 +1,4 @@
-.PHONY: help up down migrate-up migrate-down migrate-create migrate-force migrate-version seed seed-core db-setup db-reset test-db dev build run
+.PHONY: help up down backup restore migrate-up migrate-down migrate-create migrate-force migrate-version seed seed-core db-setup db-reset test-db dev build run
 
 help:
 	@echo "Available commands:"
@@ -6,6 +6,8 @@ help:
 	@echo "Docker:"
 	@echo "  make up                      - Build and start Postgres, API and dashboard in Docker"
 	@echo "  make down                    - Stop the stack"
+	@echo "  make backup                  - Dump the database into ./backups now"
+	@echo "  make restore FILE=x RESTORE_CONFIRM=yes - Restore a dump into the database"
 	@echo ""
 	@echo "Development:"
 	@echo "  make dev                     - Run with hot reload (Air)"
@@ -41,6 +43,17 @@ up:
 
 down:
 	docker compose down
+
+backup:
+	@mkdir -p backups
+	@set -o pipefail; f=backups/$(DB_NAME)-$$(date -u +%Y%m%d-%H%M%S).sql.gz; 	if docker compose exec -T postgres pg_dump -U $(DB_USER) --clean --if-exists $(DB_NAME) | gzip > $$f.tmp; then 		mv $$f.tmp $$f && echo "Backup written: $$f"; 	else 		rm -f $$f.tmp; echo "Backup failed"; exit 1; 	fi
+
+restore:
+	@if [ -z "$(FILE)" ]; then echo "Error: FILE is required. Usage: make restore FILE=backups/claude_usage-YYYYMMDD-HHMMSS.sql.gz RESTORE_CONFIRM=yes"; exit 1; fi
+	@if [ ! -f "$(FILE)" ]; then echo "Error: $(FILE) not found"; exit 1; fi
+	@if [ "$(RESTORE_CONFIRM)" != "yes" ]; then echo "This replaces all data in $(DB_NAME) with $(FILE). Re-run with RESTORE_CONFIRM=yes to continue."; exit 1; fi
+	gunzip -c $(FILE) | $(PSQL) -q -1 -d $(DB_NAME)
+	@echo "Restored $(FILE) into $(DB_NAME)"
 
 migrate-up:
 	@echo "Running core migrations..."

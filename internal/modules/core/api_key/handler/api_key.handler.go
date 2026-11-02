@@ -154,7 +154,7 @@ func (h *ApiKeyHandler) ListForUser(c *gin.Context) {
 		return
 	}
 
-	result, err := h.apiKeyService.List(c.Request.Context(), c.Param("id"), &params)
+	result, err := h.apiKeyService.ListForUser(c.Request.Context(), c.Param("id"), &params)
 	if err != nil {
 		h.handleError(c, err)
 		return
@@ -206,6 +206,8 @@ func (h *ApiKeyHandler) handleError(c *gin.Context, err error) {
 		response.Error(c, http.StatusGone, err.Error(), "")
 	case errors.Is(err, service.ErrApiKeyNotRevealable):
 		response.Error(c, http.StatusConflict, err.Error(), "")
+	case errors.Is(err, service.ErrApiKeyUserNotFound):
+		response.Error(c, http.StatusNotFound, "User not found", "")
 	case errors.Is(err, service.ErrApiKeyUserInactive):
 		response.Error(c, http.StatusUnauthorized, "API key owner account is inactive", "")
 	default:

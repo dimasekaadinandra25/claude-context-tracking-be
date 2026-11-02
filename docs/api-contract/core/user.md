@@ -95,6 +95,8 @@ PUT /core/v1/users/me/password
 { "data": null, "message": "Password changed successfully" }
 ```
 
+A successful change sets `must_change_password` to `false`.
+
 **Errors:** 400 `Current password is incorrect`.
 
 ---
@@ -109,4 +111,4 @@ GET /core/v1/users/:id
 
 **Response (200):** the user object.
 
-**Errors:** 403 Forbidden, 404 `User not found`.
+**Errors:** 403 Forbidden, 404 `User not found` (also for an `:id` that is not a UUID).

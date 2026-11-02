@@ -163,10 +163,11 @@ func (s *AuthService) SignIn(ctx context.Context, req *dto.SignInRequest, device
 		TokenType:    "Bearer",
 		ExpiresIn:    AccessTokenExpiryHours * 3600,
 		User: dto.UserInfo{
-			ID:       user.ID,
-			Email:    user.Email,
-			Username: user.Username,
-			FullName: user.FullName,
+			ID:                 user.ID,
+			Email:              user.Email,
+			Username:           user.Username,
+			FullName:           user.FullName,
+			MustChangePassword: user.MustChangePassword,
 		},
 		Roles:       roles,
 		Permissions: permissions,
@@ -327,10 +328,11 @@ func (s *AuthService) GetMe(ctx context.Context, userID string, isSuperAdmin boo
 
 	return &dto.MeResponse{
 		User: dto.UserInfo{
-			ID:       user.ID,
-			Email:    user.Email,
-			Username: user.Username,
-			FullName: user.FullName,
+			ID:                 user.ID,
+			Email:              user.Email,
+			Username:           user.Username,
+			FullName:           user.FullName,
+			MustChangePassword: user.MustChangePassword,
 		},
 		Roles:        roles,
 		Permissions:  permissions,
