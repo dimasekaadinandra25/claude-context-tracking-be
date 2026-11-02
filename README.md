@@ -164,11 +164,14 @@ Files live in `internal/database/migrations/core` and are named by timestamp: `Y
 | `20261030000002_users` | users, refresh tokens |
 | `20261030000003_rbac` | roles, user roles |
 | `20261030000004_api_keys` | API keys (secret stored as SHA-256) |
-| `20261030000005_audit_logs` | audit logs table (unused; nothing writes to it) |
+| `20261030000005_audit_logs` | audit logs table from the skeleton (dropped by `20261102064604`) |
 | `20261030000006_usage` | `usage.sessions`, `usage.session_hours` |
 | `20261102011256_api_key_secret_encrypted` | `api_keys.secret_encrypted` (full key, AES-256-GCM, for reveal) |
 | `20261102014445_users_must_change_password` | `users.must_change_password`, set for the seeded `admin` |
 | `20261102015038_session_hours_output_subagent` | `session_hours.output_tokens`, `subagent_requests`, `subagent_output_tokens` |
+| `20261102033939_budgets` | `usage.budgets` (monthly new-context budget per member) |
+| `20261102043258_app_version_billed_tokens` | `api_keys.app_version`, `session_hours.input_tokens`, `cache_write_tokens`, `cache_read_tokens` |
+| `20261102064604_drop_audit_logs` | drops the unused `core.audit_logs` |
 
 ## API
 
