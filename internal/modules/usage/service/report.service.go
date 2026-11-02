@@ -32,6 +32,14 @@ func (s *Service) scope(c dto.Caller, requested string) string {
 	return c.UserID
 }
 
+func location(tz string) (*time.Location, error) {
+	loc, err := time.LoadLocation(tz)
+	if err != nil || tz == "Local" {
+		return nil, fmt.Errorf("%w: unknown tz %q", ErrInvalidInput, tz)
+	}
+	return loc, nil
+}
+
 func (s *Service) prepare(c dto.Caller, q dto.ReportQuery) (dto.ReportQuery, *time.Location, error) {
 	q.UserID = s.scope(c, q.UserID)
 	if q.UserID != "" {
@@ -42,9 +50,9 @@ func (s *Service) prepare(c dto.Caller, q dto.ReportQuery) (dto.ReportQuery, *ti
 	if q.TZ == "" {
 		q.TZ = defaultTZ
 	}
-	loc, err := time.LoadLocation(q.TZ)
-	if err != nil || q.TZ == "Local" {
-		return q, nil, fmt.Errorf("%w: unknown tz %q", ErrInvalidInput, q.TZ)
+	loc, err := location(q.TZ)
+	if err != nil {
+		return q, nil, err
 	}
 	if q.To.IsZero() {
 		q.To = time.Now()

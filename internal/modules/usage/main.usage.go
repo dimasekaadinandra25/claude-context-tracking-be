@@ -29,4 +29,7 @@ func (m *Module) SetupRoutes(rg *gin.RouterGroup) {
 	rg.GET("/sessions", m.Handler.Sessions)
 	rg.GET("/sessions/:id", m.Handler.Session)
 	rg.GET("/people", m.Handler.People)
+	rg.GET("/budgets", m.Handler.Budgets)
+	rg.PUT("/budgets/:user_id", m.Handler.SetBudget)
+	rg.DELETE("/budgets/:user_id", m.Handler.DeleteBudget)
 }

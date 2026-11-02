@@ -85,6 +85,8 @@ func fail(c *gin.Context, err error) {
 		response.Error(c, http.StatusBadRequest, "Invalid query parameters", err.Error())
 	case errors.Is(err, service.ErrNotFound):
 		response.Error(c, http.StatusNotFound, "Session not found", "")
+	case errors.Is(err, service.ErrUserNotFound):
+		response.Error(c, http.StatusNotFound, "User not found", "")
 	case errors.Is(err, service.ErrForbidden):
 		response.Error(c, http.StatusForbidden, "Forbidden", err.Error())
 	default:

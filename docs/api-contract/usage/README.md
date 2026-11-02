@@ -101,6 +101,9 @@ Every route with an `:id` returns 404 for an unknown id or one that is not a UUI
 | 14 | GET | `/core/v1/admin/users/:id/api-keys` | JWT, admin |
 | 15 | POST | `/core/v1/admin/api-keys/:id/revoke` | JWT, admin |
 | 16 | GET | `/core/v1/admin/api-keys/:id/reveal` | JWT, admin |
+| 17 | GET | `/usage/v1/budgets` | JWT |
+| 18 | PUT | `/usage/v1/budgets/:user_id` | JWT, admin |
+| 19 | DELETE | `/usage/v1/budgets/:user_id` | JWT, admin |
 
 ---
 
@@ -494,6 +497,112 @@ GET /usage/v1/people
 | 401 | Unauthorized | Missing or expired JWT |
 | 403 | Forbidden | Called with an API key, or a member calling `/people` |
 | 404 | Session not found | Unknown session, or another user's session for a member |
+
+---
+
+## Budgets
+
+A budget is a monthly `new_context` allowance for one person, stored in `usage.budgets`. The month is the calendar month in `tz`.
+
+### 17. List Budgets
+
+Every active, non-deleted user with their budget and this month's usage. A member gets a single entry: themselves.
+
+```
+GET /usage/v1/budgets?tz=Asia/Jakarta
+```
+
+**Auth:** JWT
+
+| Param | Type | Default | Notes |
+|-------|------|---------|-------|
+| `tz` | IANA name | `UTC` | Sets where the month starts. Unknown names return 400 |
+
+**Response (200):**
+```json
+{
+  "data": [
+    {
+      "user_id": "d6cb9822-0d8e-4361-9e47-97ef72633428",
+      "full_name": "Mia",
+      "email": "mia@claude-usage.local",
+      "monthly_new_context": 5000000,
+      "used_new_context": 48000,
+      "month_start": "2026-11-01T00:00:00+07:00"
+    },
+    {
+      "user_id": "b61e8255-5aef-42a3-8fdc-8c191295af10",
+      "full_name": "Administrator",
+      "email": "admin@claude-usage.local",
+      "monthly_new_context": null,
+      "used_new_context": 0,
+      "month_start": "2026-11-01T00:00:00+07:00"
+    }
+  ],
+  "message": "Budgets retrieved"
+}
+```
+
+| Field | Notes |
+|-------|-------|
+| `monthly_new_context` | The budget, or `null` when none is set |
+| `used_new_context` | Sum of the person's hour rows with `hour` from `month_start` until now |
+| `month_start` | Midnight on the 1st of the current month in `tz`, written with its UTC offset |
+
+Sorted by full name, then email.
+
+---
+
+### 18. Set Budget
+
+Creates or replaces a person's budget.
+
+```
+PUT /usage/v1/budgets/:user_id
+```
+
+**Auth:** JWT, admin. Members get 403 `admins only`.
+
+**Request:**
+```json
+{ "monthly_new_context": 5000000 }
+```
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `monthly_new_context` | int | Yes | > 0 |
+
+**Response (200):**
+```json
+{ "data": null, "message": "Budget saved" }
+```
+
+---
+
+### 19. Delete Budget
+
+Removes a person's budget. Deleting a budget that does not exist succeeds and changes nothing.
+
+```
+DELETE /usage/v1/budgets/:user_id
+```
+
+**Auth:** JWT, admin. Members get 403 `admins only`.
+
+**Response (200):**
+```json
+{ "data": null, "message": "Budget deleted" }
+```
+
+**Budget errors (17-19):**
+
+| Status | Message | When |
+|--------|---------|------|
+| 400 | Invalid query parameters | Unknown `tz` |
+| 400 | Invalid request payload | Bad JSON, missing `monthly_new_context`, or a value that is not > 0 |
+| 401 | Unauthorized | Missing or expired JWT |
+| 403 | Forbidden | Called with an API key, or a member calling PUT or DELETE |
+| 404 | User not found | Unknown or deleted user, or `:user_id` is not a UUID |
 
 ---
 
