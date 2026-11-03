@@ -33,3 +33,10 @@ type HourUsage struct {
 	CacheWriteTokens     int64     `json:"cache_write_tokens"`
 	CacheReadTokens      int64     `json:"cache_read_tokens"`
 }
+
+type Overhead struct {
+	SystemTokens int64 `json:"system_tokens"`
+	MemoryTokens int64 `json:"memory_tokens"`
+	AgentsTokens int64 `json:"agents_tokens"`
+	SkillsTokens int64 `json:"skills_tokens"`
+}

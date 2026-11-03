@@ -42,7 +42,7 @@ func (s *Service) Ingest(ctx context.Context, userID string, req dto.IngestReque
 			res.Rejected = append(res.Rejected, dto.Rejection{SessionID: p.SessionID, Reason: err.Error()})
 			continue
 		}
-		owned, err := s.repo.SaveSession(ctx, toSession(userID, req.Machine, p), toHours(p.Hours))
+		owned, err := s.repo.SaveSession(ctx, toSession(userID, req.Machine, p), p.Overhead, toHours(p.Hours))
 		if err != nil {
 			return dto.IngestResponse{}, err
 		}
@@ -97,7 +97,11 @@ func validate(s dto.SessionPayload) error {
 			return fmt.Errorf("%s must not contain NUL characters", field)
 		}
 	}
-	for _, n := range []int64{s.ContextWindow, s.StartContext, s.LatestContext, s.PeakContext, s.NewContext, int64(s.Requests), int64(s.Compactions)} {
+	numbers := []int64{s.ContextWindow, s.StartContext, s.LatestContext, s.PeakContext, s.NewContext, int64(s.Requests), int64(s.Compactions)}
+	if o := s.Overhead; o != nil {
+		numbers = append(numbers, o.SystemTokens, o.MemoryTokens, o.AgentsTokens, o.SkillsTokens)
+	}
+	for _, n := range numbers {
 		if n < 0 {
 			return errors.New("numbers must be >= 0")
 		}

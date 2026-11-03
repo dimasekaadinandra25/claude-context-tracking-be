@@ -23,8 +23,9 @@ const upsertSession = `
 	INSERT INTO usage.sessions (
 		id, user_id, machine, project, title, model,
 		context_window, start_context, latest_context, peak_context, new_context,
-		requests, compactions, first_request_at, last_request_at
-	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		requests, compactions, first_request_at, last_request_at,
+		overhead_system_tokens, overhead_memory_tokens, overhead_agents_tokens, overhead_skills_tokens
+	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 	ON CONFLICT (id) DO UPDATE SET
 		machine = EXCLUDED.machine,
 		project = EXCLUDED.project,
@@ -39,6 +40,10 @@ const upsertSession = `
 		compactions = EXCLUDED.compactions,
 		first_request_at = EXCLUDED.first_request_at,
 		last_request_at = EXCLUDED.last_request_at,
+		overhead_system_tokens = COALESCE(EXCLUDED.overhead_system_tokens, usage.sessions.overhead_system_tokens),
+		overhead_memory_tokens = COALESCE(EXCLUDED.overhead_memory_tokens, usage.sessions.overhead_memory_tokens),
+		overhead_agents_tokens = COALESCE(EXCLUDED.overhead_agents_tokens, usage.sessions.overhead_agents_tokens),
+		overhead_skills_tokens = COALESCE(EXCLUDED.overhead_skills_tokens, usage.sessions.overhead_skills_tokens),
 		last_reported_at = NOW(),
 		updated_at = NOW()
 	WHERE usage.sessions.user_id = EXCLUDED.user_id AND EXCLUDED.last_request_at >= usage.sessions.last_request_at
@@ -55,18 +60,23 @@ const insertHours = `
 		AS h(hour, model, new_context, requests, output_tokens, subagent_requests, subagent_output_tokens, input_tokens, cache_write_tokens, cache_read_tokens)
 	ON CONFLICT (session_id, hour, model) DO NOTHING`
 
-func (r *Repository) SaveSession(ctx context.Context, s domain.Session, hours []domain.HourUsage) (bool, error) {
+func (r *Repository) SaveSession(ctx context.Context, s domain.Session, overhead *domain.Overhead, hours []domain.HourUsage) (bool, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	var system, memory, agents, skills *int64
+	if overhead != nil {
+		system, memory, agents, skills = &overhead.SystemTokens, &overhead.MemoryTokens, &overhead.AgentsTokens, &overhead.SkillsTokens
+	}
 	var id string
 	err = tx.QueryRow(ctx, upsertSession,
 		s.ID, s.UserID, s.Machine, s.Project, s.Title, s.Model,
 		s.ContextWindow, s.StartContext, s.LatestContext, s.PeakContext, s.NewContext,
 		s.Requests, s.Compactions, s.FirstRequestAt, s.LastRequestAt,
+		system, memory, agents, skills,
 	).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		var owned bool

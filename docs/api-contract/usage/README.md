@@ -104,6 +104,7 @@ Every route with an `:id` returns 404 for an unknown id or one that is not a UUI
 | 17 | GET | `/usage/v1/budgets` | JWT |
 | 18 | PUT | `/usage/v1/budgets/:user_id` | JWT, admin |
 | 19 | DELETE | `/usage/v1/budgets/:user_id` | JWT, admin |
+| 20 | GET | `/usage/v1/projects` | JWT |
 
 ---
 
@@ -146,7 +147,8 @@ POST /usage/v1/sessions
       "hours": [
         { "hour": "2026-10-30T02:00:00Z", "model": "claude-opus-5-5", "new_context": 40000, "requests": 120, "output_tokens": 15000, "subagent_requests": 4, "subagent_output_tokens": 6000, "input_tokens": 1200, "cache_write_tokens": 38000, "cache_read_tokens": 2400000 },
         { "hour": "2026-10-30T06:00:00Z", "model": "claude-sonnet-5-5", "new_context": 8000, "requests": 30, "output_tokens": 2500, "subagent_requests": 0, "subagent_output_tokens": 0, "input_tokens": 300, "cache_write_tokens": 7700, "cache_read_tokens": 600000 }
-      ]
+      ],
+      "overhead": { "system_tokens": 14000, "memory_tokens": 3200, "agents_tokens": 1800, "skills_tokens": 900 }
     }
   ]
 }
@@ -181,6 +183,7 @@ POST /usage/v1/sessions
 | `hours[].input_tokens` | int | No | Uncached input tokens billed in that hour for that model, ≥ 0. Missing = 0 |
 | `hours[].cache_write_tokens` | int | No | Cache write (creation) tokens, ≥ 0. Missing = 0 |
 | `hours[].cache_read_tokens` | int | No | Cache read tokens, ≥ 0. Missing = 0 |
+| `sessions[].overhead` | object | No | Fixed context overhead of the session: `system_tokens`, `memory_tokens`, `agents_tokens`, `skills_tokens`, each an int ≥ 0 (missing key = 0). Stored on `usage.sessions` (`overhead_*_tokens`). Sent values replace the stored ones; omitting `overhead` leaves them unchanged |
 
 The body may be at most 64 MB.
 
@@ -188,6 +191,7 @@ The body may be at most 64 MB.
 - Values are **absolute**. The session row and each `(session_id, hour, model)` row are replaced, never added to. Sending the same payload twice leaves the totals unchanged.
 - Each session is saved in its own transaction (session row plus hour rows).
 - Each entry of `sessions` is decoded and validated on its own. A session that cannot be decoded (wrong types, timestamps that are empty or not RFC 3339, numbers out of range), fails validation, or whose `session_id` already belongs to another user, is listed in `rejected`. The rest of the payload is still saved and the other user's data is untouched. A session that cannot be decoded is listed with the `session_id` it carried, or `""` if none could be read.
+- `overhead` is the exception: a session sent without it keeps its stored overhead (`null` until it is first sent). A negative overhead value rejects that session with `numbers must be >= 0`.
 - A session whose `latest_at` is older than the stored `last_request_at` is stale (a slower, older send that arrived late). It is skipped without touching the stored session or its hours and still counts as `accepted`. An equal `latest_at` replaces the stored values.
 - `api_keys.last_used_at` is updated on every call. Reports show it as `last_synced_at`.
 - `api_keys.app_version` is set from a valid `X-App-Version` header after the batch is saved. A call without the header leaves it unchanged. Reports show it as `app_version`.
@@ -233,7 +237,7 @@ Rejection reasons: `session_id must be 1-100 characters`, `model must be 1-100 c
 
 ## Report Parameters
 
-Reports 2-5 accept these query parameters:
+Reports 2-5 and 20 accept these query parameters:
 
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
@@ -242,7 +246,7 @@ Reports 2-5 accept these query parameters:
 | `tz` | IANA name | `Asia/Jakarta` | Used for day buckets. Unknown names return 400 |
 | `user_id` | UUID | none (everyone) | **Admins only.** For members it is ignored and forced to their own ID |
 
-Ranges filter on the UTC hour of each request (`session_hours.hour`). Usage of soft-deleted users is left out of overview, timeseries, models and the sessions list, so the tabs agree.
+Ranges filter on the UTC hour of each request (`session_hours.hour`). Usage of soft-deleted users is left out of overview, timeseries, models, projects and the sessions list, so the tabs agree.
 
 Write `from` and `to` in UTC with a `Z` suffix (`2026-10-29T00:00:00Z`). An offset such as `+07:00` must be URL-encoded as `%2B07:00`; a raw `+` in a query string is read as a space and the request fails with 400.
 
@@ -274,6 +278,11 @@ GET /usage/v1/overview?from=2026-10-29T00:00:00Z&to=2026-10-31T00:00:00Z&tz=Asia
         "output_tokens": 17500,
         "subagent_requests": 4,
         "subagent_output_tokens": 6000,
+        "input_tokens": 1500,
+        "cache_write_tokens": 45700,
+        "cache_read_tokens": 3000000,
+        "sessions_near_full": 0,
+        "compactions": 1,
         "last_request_at": "2026-10-30T06:58:40.456Z",
         "last_synced_at": "2026-10-30T04:18:58.36942Z",
         "app_version": "0.2.0",
@@ -290,6 +299,11 @@ GET /usage/v1/overview?from=2026-10-29T00:00:00Z&to=2026-10-31T00:00:00Z&tz=Asia
         "output_tokens": 0,
         "subagent_requests": 0,
         "subagent_output_tokens": 0,
+        "input_tokens": 0,
+        "cache_write_tokens": 0,
+        "cache_read_tokens": 0,
+        "sessions_near_full": 0,
+        "compactions": 0,
         "last_request_at": null,
         "last_synced_at": null,
         "app_version": null,
@@ -302,7 +316,12 @@ GET /usage/v1/overview?from=2026-10-29T00:00:00Z&to=2026-10-31T00:00:00Z&tz=Asia
     "active_people": 1,
     "total_output_tokens": 17500,
     "total_subagent_requests": 4,
-    "total_subagent_output_tokens": 6000
+    "total_subagent_output_tokens": 6000,
+    "total_input_tokens": 1500,
+    "total_cache_write_tokens": 45700,
+    "total_cache_read_tokens": 3000000,
+    "total_sessions_near_full": 0,
+    "total_compactions": 1
   },
   "message": "Overview retrieved"
 }
@@ -310,7 +329,9 @@ GET /usage/v1/overview?from=2026-10-29T00:00:00Z&to=2026-10-31T00:00:00Z&tz=Asia
 
 | Field | Notes |
 |-------|-------|
-| `new_context`, `requests`, `output_tokens`, `subagent_requests`, `subagent_output_tokens` | Sums of the hour rows in the range |
+| `new_context`, `requests`, `output_tokens`, `subagent_requests`, `subagent_output_tokens`, `input_tokens`, `cache_write_tokens`, `cache_read_tokens` | Sums of the hour rows in the range |
+| `sessions_near_full` | The person's sessions with at least one hour row in the range whose `peak_context >= 0.8 * context_window` (sessions with `context_window = 0` never count) |
+| `compactions` | Sum of the lifetime `compactions` of the person's sessions with at least one hour row in the range |
 | `total_*` | Sums over `people` |
 | `sessions` | Sessions with at least one hour row in the range |
 | `current_model`, `last_request_at` | From the person's most recent session overall |
@@ -378,6 +399,68 @@ GET /usage/v1/models?from=...&to=...
 
 ---
 
+### 20. Projects
+
+Per-project totals for every project with usage in the range, largest `new_context` first (ties by project name).
+
+```
+GET /usage/v1/projects?from=...&to=...&tz=Asia/Jakarta&user_id=
+```
+
+**Auth:** JWT. Members only see their own sessions; admins may filter with `user_id`.
+
+**Response (200):**
+```json
+{
+  "data": [
+    {
+      "project": "C:\\Code\\Claude Usage Monitor",
+      "new_context": 48000,
+      "requests": 150,
+      "output_tokens": 17500,
+      "input_tokens": 1500,
+      "cache_write_tokens": 45700,
+      "cache_read_tokens": 3000000,
+      "sessions": 1,
+      "members": 1,
+      "models": ["claude-opus-5-5", "claude-sonnet-5-5"],
+      "compactions": 1,
+      "sessions_near_full": 0,
+      "overhead": { "system_tokens": 14000, "memory_tokens": 3200, "agents_tokens": 1800, "skills_tokens": 900 }
+    },
+    {
+      "project": "",
+      "new_context": 200,
+      "requests": 2,
+      "output_tokens": 40,
+      "input_tokens": 0,
+      "cache_write_tokens": 0,
+      "cache_read_tokens": 0,
+      "sessions": 1,
+      "members": 1,
+      "models": ["claude-opus-5-5"],
+      "compactions": 0,
+      "sessions_near_full": 0,
+      "overhead": null
+    }
+  ],
+  "message": "Projects retrieved"
+}
+```
+
+| Field | Notes |
+|-------|-------|
+| `project` | `usage.sessions.project`. Sessions sent without a project (privacy mode) are grouped under `""`, which is kept as a row |
+| `new_context`, `requests`, `output_tokens`, `input_tokens`, `cache_write_tokens`, `cache_read_tokens` | Sums of the project's hour rows in the range |
+| `sessions` | Sessions with at least one hour row in the range |
+| `members` | Distinct people with hour rows in the range |
+| `models` | Distinct models of those hour rows, ordered by their summed `new_context` (largest first), then by name |
+| `compactions` | Sum of the lifetime `compactions` of those sessions |
+| `sessions_near_full` | Those sessions whose `peak_context >= 0.8 * context_window` (`context_window > 0`) |
+| `overhead` | From the most recently active (`last_request_at`) of those sessions that has an overhead, or `null` |
+
+---
+
 ### 5. Session List
 
 Paged `usage.sessions` rows with the owner's name. Only sessions with activity inside the range are listed.
@@ -422,7 +505,10 @@ GET /usage/v1/sessions?from=...&to=...&project=&model=&q=&page=1&per_page=25&sor
       "models": ["claude-opus-5-5", "claude-sonnet-5-5"],
       "output_tokens": 17500,
       "subagent_requests": 4,
-      "subagent_output_tokens": 6000
+      "subagent_output_tokens": 6000,
+      "input_tokens": 1500,
+      "cache_write_tokens": 45700,
+      "cache_read_tokens": 3000000
     }
   ],
   "message": "Sessions retrieved",
@@ -432,7 +518,7 @@ GET /usage/v1/sessions?from=...&to=...&project=&model=&q=&page=1&per_page=25&sor
 }
 ```
 
-`new_context`, `output_tokens`, `subagent_requests` and `subagent_output_tokens` here are sums of the session's hour rows with `hour` in `[from, to)`, and sorting by `new_context` uses that value. A session is listed when, in the range, `new_context > 0`, `output_tokens > 0` or `subagent_requests > 0`. `requests` and the context fields are the session's lifetime values. `GET /usage/v1/sessions/:id` returns the lifetime `new_context`.
+`new_context`, `output_tokens`, `subagent_requests`, `subagent_output_tokens`, `input_tokens`, `cache_write_tokens` and `cache_read_tokens` here are sums of the session's hour rows with `hour` in `[from, to)`, and sorting by `new_context` uses that value. A session is listed when, in the range, `new_context > 0`, `output_tokens > 0` or `subagent_requests > 0`. `requests` and the context fields are the session's lifetime values. `GET /usage/v1/sessions/:id` returns the lifetime `new_context`.
 
 `model` is the session's current model. `models` lists every model the session used: the distinct models of its hour rows, ordered by their summed `new_context` (largest first), then by name. A session with no hour rows gets `[model]`.
 
@@ -475,13 +561,14 @@ GET /usage/v1/sessions/:id
     "hours": [
       { "hour": "2026-10-30T02:00:00Z", "model": "claude-opus-5-5", "new_context": 40000, "requests": 120, "output_tokens": 15000, "subagent_requests": 4, "subagent_output_tokens": 6000, "input_tokens": 1200, "cache_write_tokens": 38000, "cache_read_tokens": 2400000 },
       { "hour": "2026-10-30T06:00:00Z", "model": "claude-sonnet-5-5", "new_context": 8000, "requests": 30, "output_tokens": 2500, "subagent_requests": 0, "subagent_output_tokens": 0, "input_tokens": 300, "cache_write_tokens": 7700, "cache_read_tokens": 600000 }
-    ]
+    ],
+    "overhead": { "system_tokens": 14000, "memory_tokens": 3200, "agents_tokens": 1800, "skills_tokens": 900 }
   },
   "message": "Session retrieved"
 }
 ```
 
-`models` follows the same rules as in the session list.
+`models` follows the same rules as in the session list. `overhead` is the last overhead the app sent for the session, or `null` if it never sent one.
 
 ---
 
@@ -506,7 +593,7 @@ GET /usage/v1/people
 }
 ```
 
-**Report errors (2-7):**
+**Report errors (2-7, 20):**
 
 | Status | Message | When |
 |--------|---------|------|

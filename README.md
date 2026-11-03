@@ -4,7 +4,7 @@ Collects Claude Code usage from the team's Claude Usage Monitor desktop apps and
 
 - Each desktop app sends its sessions every 30 minutes to `POST /usage/v1/sessions` with an API key. Sends carry absolute values and are upserted, so retries and restarts never double count.
 - Postgres (in Docker) keeps one row per Claude Code session and its growth per UTC hour per model.
-- The dashboard signs in with a JWT and reads `/usage/v1/overview`, `/timeseries`, `/models`, `/sessions` and `/people`. Admins (`super_admin`) see everyone; members see only themselves.
+- The dashboard signs in with a JWT and reads `/usage/v1/overview`, `/timeseries`, `/models`, `/projects`, `/sessions` and `/people`. Admins (`super_admin`) see everyone; members see only themselves.
 - Admins create users and issue API keys under `/core/v1/admin`.
 
 v1 runs on localhost only: every port is published on `127.0.0.1`, and CORS allows `http://localhost:5173` and `http://localhost:3000`.
@@ -121,7 +121,7 @@ Other admin actions: list users (`GET /core/v1/admin/users`), reset a password, 
 
 ## Backups
 
-The `backup` service (`postgres:17-alpine`) runs `pg_dump --clean --if-exists` of `claude_usage` once on start and then every 24 hours, writing `./backups/claude_usage-YYYYMMDD-HHMMSS.sql.gz` (UTC). A dump is written to a `.tmp` file and renamed only when `pg_dump` succeeds, so a failed run leaves no partial file. Dumps older than 14 days are deleted after each run. It uses `DB_PASSWORD` from `.env` as `PGPASSWORD`. `backups/` is ignored by git and by the Docker build.
+The `backup` service (`postgres:17-alpine`) wakes on start and then every hour, and runs `pg_dump --clean --if-exists` of `claude_usage` only when the newest `./backups/claude_usage-*.sql.gz` is missing or older than 24 hours, writing `./backups/claude_usage-YYYYMMDD-HHMMSS.sql.gz` (UTC). A machine that reboots daily still gets a dump each day, and a failed dump is retried the next hour. A dump is written to a `.tmp` file and renamed only when `pg_dump` succeeds, so a failed run leaves no partial file. Files are created with `umask 077` (owner-only). Dumps older than 14 days are deleted only after a successful dump. It uses `DB_PASSWORD` from `.env` as `PGPASSWORD`. `backups/` is ignored by git and by the Docker build.
 
 Check it with `docker compose logs backup`. Take a dump now with:
 
@@ -172,6 +172,7 @@ Files live in `internal/database/migrations/core` and are named by timestamp: `Y
 | `20261102033939_budgets` | `usage.budgets` (monthly new-context budget per member) |
 | `20261102043258_app_version_billed_tokens` | `api_keys.app_version`, `session_hours.input_tokens`, `cache_write_tokens`, `cache_read_tokens` |
 | `20261102064604_drop_audit_logs` | drops the unused `core.audit_logs` |
+| `20261103022955_session_overhead` | nullable `sessions.overhead_system_tokens`, `overhead_memory_tokens`, `overhead_agents_tokens`, `overhead_skills_tokens` |
 
 ## API
 

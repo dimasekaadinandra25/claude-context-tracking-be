@@ -132,6 +132,19 @@ func (h *Handler) Models(c *gin.Context) {
 	response.Success(c, http.StatusOK, "Models retrieved", res)
 }
 
+func (h *Handler) Projects(c *gin.Context) {
+	who, q, ok := reportRequest[dto.ReportQuery](c)
+	if !ok {
+		return
+	}
+	res, err := h.service.Projects(c.Request.Context(), who, q)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	response.Success(c, http.StatusOK, "Projects retrieved", res)
+}
+
 func (h *Handler) Sessions(c *gin.Context) {
 	who, sq, ok := reportRequest[dto.SessionQuery](c)
 	if !ok {

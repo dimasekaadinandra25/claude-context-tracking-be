@@ -26,6 +26,7 @@ func (m *Module) SetupRoutes(rg *gin.RouterGroup) {
 	rg.GET("/overview", m.Handler.Overview)
 	rg.GET("/timeseries", m.Handler.Timeseries)
 	rg.GET("/models", m.Handler.Models)
+	rg.GET("/projects", m.Handler.Projects)
 	rg.GET("/sessions", m.Handler.Sessions)
 	rg.GET("/sessions/:id", m.Handler.Session)
 	rg.GET("/people", m.Handler.People)

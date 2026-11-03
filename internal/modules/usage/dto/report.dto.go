@@ -34,6 +34,11 @@ type PersonSummary struct {
 	OutputTokens         int64      `json:"output_tokens"`
 	SubagentRequests     int64      `json:"subagent_requests"`
 	SubagentOutputTokens int64      `json:"subagent_output_tokens"`
+	InputTokens          int64      `json:"input_tokens"`
+	CacheWriteTokens     int64      `json:"cache_write_tokens"`
+	CacheReadTokens      int64      `json:"cache_read_tokens"`
+	SessionsNearFull     int64      `json:"sessions_near_full"`
+	Compactions          int64      `json:"compactions"`
 	LastRequestAt        *time.Time `json:"last_request_at"`
 	LastSyncedAt         *time.Time `json:"last_synced_at"`
 	AppVersion           *string    `json:"app_version"`
@@ -49,6 +54,11 @@ type Overview struct {
 	TotalOutputTokens         int64           `json:"total_output_tokens"`
 	TotalSubagentRequests     int64           `json:"total_subagent_requests"`
 	TotalSubagentOutputTokens int64           `json:"total_subagent_output_tokens"`
+	TotalInputTokens          int64           `json:"total_input_tokens"`
+	TotalCacheWriteTokens     int64           `json:"total_cache_write_tokens"`
+	TotalCacheReadTokens      int64           `json:"total_cache_read_tokens"`
+	TotalSessionsNearFull     int64           `json:"total_sessions_near_full"`
+	TotalCompactions          int64           `json:"total_compactions"`
 }
 
 type Point struct {
@@ -99,6 +109,9 @@ type SessionRow struct {
 	OutputTokens         int64    `json:"output_tokens"`
 	SubagentRequests     int64    `json:"subagent_requests"`
 	SubagentOutputTokens int64    `json:"subagent_output_tokens"`
+	InputTokens          int64    `json:"input_tokens"`
+	CacheWriteTokens     int64    `json:"cache_write_tokens"`
+	CacheReadTokens      int64    `json:"cache_read_tokens"`
 }
 
 type SessionDetail struct {
@@ -106,6 +119,23 @@ type SessionDetail struct {
 	UserName string             `json:"user_name"`
 	Models   []string           `json:"models"`
 	Hours    []domain.HourUsage `json:"hours"`
+	Overhead *domain.Overhead   `json:"overhead"`
+}
+
+type ProjectSummary struct {
+	Project          string           `json:"project"`
+	NewContext       int64            `json:"new_context"`
+	Requests         int64            `json:"requests"`
+	OutputTokens     int64            `json:"output_tokens"`
+	InputTokens      int64            `json:"input_tokens"`
+	CacheWriteTokens int64            `json:"cache_write_tokens"`
+	CacheReadTokens  int64            `json:"cache_read_tokens"`
+	Sessions         int64            `json:"sessions"`
+	Members          int64            `json:"members"`
+	Models           []string         `json:"models"`
+	Compactions      int64            `json:"compactions"`
+	SessionsNearFull int64            `json:"sessions_near_full"`
+	Overhead         *domain.Overhead `json:"overhead"`
 }
 
 type Person struct {

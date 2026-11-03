@@ -83,6 +83,11 @@ func (s *Service) Overview(ctx context.Context, c dto.Caller, q dto.ReportQuery)
 		ov.TotalOutputTokens += p.OutputTokens
 		ov.TotalSubagentRequests += p.SubagentRequests
 		ov.TotalSubagentOutputTokens += p.SubagentOutputTokens
+		ov.TotalInputTokens += p.InputTokens
+		ov.TotalCacheWriteTokens += p.CacheWriteTokens
+		ov.TotalCacheReadTokens += p.CacheReadTokens
+		ov.TotalSessionsNearFull += p.SessionsNearFull
+		ov.TotalCompactions += p.Compactions
 		if p.NewContext > 0 {
 			ov.ActivePeople++
 		}
@@ -114,6 +119,14 @@ func (s *Service) Models(ctx context.Context, c dto.Caller, q dto.ReportQuery) (
 		return nil, err
 	}
 	return s.repo.Models(ctx, q)
+}
+
+func (s *Service) Projects(ctx context.Context, c dto.Caller, q dto.ReportQuery) ([]dto.ProjectSummary, error) {
+	q, _, err := s.prepare(c, q)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.Projects(ctx, q)
 }
 
 func (s *Service) Sessions(ctx context.Context, c dto.Caller, sq dto.SessionQuery) ([]dto.SessionRow, int64, error) {
