@@ -173,6 +173,7 @@ Files live in `internal/database/migrations/core` and are named by timestamp: `Y
 | `20261102043258_app_version_billed_tokens` | `api_keys.app_version`, `session_hours.input_tokens`, `cache_write_tokens`, `cache_read_tokens` |
 | `20261102064604_drop_audit_logs` | drops the unused `core.audit_logs` |
 | `20261103022955_session_overhead` | nullable `sessions.overhead_system_tokens`, `overhead_memory_tokens`, `overhead_agents_tokens`, `overhead_skills_tokens` |
+| `20261104010000_tool_activity_plan_limits` | new tables `usage.session_tool_hours` (calls, lines and commits per session, hour and tool) and `usage.plan_limits` (latest 5-hour and 7-day usage per member) |
 
 ## API
 

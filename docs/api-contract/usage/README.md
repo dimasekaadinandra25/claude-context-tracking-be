@@ -89,6 +89,7 @@ Every route with an `:id` returns 404 for an unknown id or one that is not a UUI
 | 2 | GET | `/usage/v1/overview` | JWT |
 | 3 | GET | `/usage/v1/timeseries` | JWT |
 | 4 | GET | `/usage/v1/models` | JWT |
+| 21 | GET | `/usage/v1/tools` | JWT |
 | 5 | GET | `/usage/v1/sessions` | JWT |
 | 6 | GET | `/usage/v1/sessions/:id` | JWT |
 | 7 | GET | `/usage/v1/people` | JWT, admin |
@@ -183,6 +184,8 @@ POST /usage/v1/sessions
 | `hours[].input_tokens` | int | No | Uncached input tokens billed in that hour for that model, ≥ 0. Missing = 0 |
 | `hours[].cache_write_tokens` | int | No | Cache write (creation) tokens, ≥ 0. Missing = 0 |
 | `hours[].cache_read_tokens` | int | No | Cache read tokens, ≥ 0. Missing = 0 |
+| `plan_limits` | object | No | The member's Claude plan usage from the status line: `five_hour` and `seven_day`, each `{ "used_percentage": 0-100, "resets_at": unix seconds }` and optional, plus `captured_at` (unix seconds). The newest `captured_at` wins per member. Invalid values are ignored and never fail the sync |
+| `sessions[].tools` | array | No | Activity per whole UTC hour and tool: `hour`, `tool` (1-100 characters), `calls`, `lines_added`, `lines_removed`, `commits`, each number ≥ 0. Stored in `usage.session_tool_hours`. Counts only, never commands, code or file names |
 | `sessions[].overhead` | object | No | Fixed context overhead of the session: `system_tokens`, `memory_tokens`, `agents_tokens`, `skills_tokens`, each an int ≥ 0 (missing key = 0). Stored on `usage.sessions` (`overhead_*_tokens`). Sent values replace the stored ones; omitting `overhead` leaves them unchanged |
 
 The body may be at most 64 MB.
@@ -191,6 +194,7 @@ The body may be at most 64 MB.
 - Values are **absolute**. The session row and each `(session_id, hour, model)` row are replaced, never added to. Sending the same payload twice leaves the totals unchanged.
 - Each session is saved in its own transaction (session row plus hour rows).
 - Each entry of `sessions` is decoded and validated on its own. A session that cannot be decoded (wrong types, timestamps that are empty or not RFC 3339, numbers out of range), fails validation, or whose `session_id` already belongs to another user, is listed in `rejected`. The rest of the payload is still saved and the other user's data is untouched. A session that cannot be decoded is listed with the `session_id` it carried, or `""` if none could be read.
+- `tools` follows the same replace rule when it is sent, including `[]`. A session sent without the key keeps its stored rows, so older app versions don't erase them.
 - `overhead` is the exception: a session sent without it keeps its stored overhead (`null` until it is first sent). A negative overhead value rejects that session with `numbers must be >= 0`.
 - A session whose `latest_at` is older than the stored `last_request_at` is stale (a slower, older send that arrived late). It is skipped without touching the stored session or its hours and still counts as `accepted`. An equal `latest_at` replaces the stored values.
 - `api_keys.last_used_at` is updated on every call. Reports show it as `last_synced_at`.
@@ -344,6 +348,8 @@ A member gets a single entry: themselves.
 
 ---
 
+Overview rows also carry `lines_added`, `lines_removed` and `commits` in the range (totals `total_lines_added`, `total_lines_removed`, `total_commits`), and the member's latest plan limits regardless of range: `five_hour_used`, `five_hour_resets_at`, `seven_day_used`, `seven_day_resets_at` (each `null` when never sent or once the window has reset) and `limits_captured_at`.
+
 ### 3. Timeseries
 
 Buckets of `SUM(new_context)`, `SUM(requests)`, `SUM(output_tokens)`, `SUM(subagent_requests)` and `SUM(subagent_output_tokens)`.
@@ -461,6 +467,25 @@ GET /usage/v1/projects?from=...&to=...&tz=Asia/Jakarta&user_id=
 
 ---
 
+### 21. Tools
+
+```
+GET /usage/v1/tools?from=...&to=...
+```
+
+Takes the report parameters. Returns tool activity in the range, most calls first:
+
+```json
+[
+  { "tool": "Bash", "calls": 120, "lines_added": 0, "lines_removed": 0, "commits": 4 },
+  { "tool": "Edit", "calls": 80, "lines_added": 950, "lines_removed": 210, "commits": 0 }
+]
+```
+
+MCP tools are grouped as `MCP`. Members only see their own activity.
+
+---
+
 ### 5. Session List
 
 Paged `usage.sessions` rows with the owner's name. Only sessions with activity inside the range are listed.
@@ -567,6 +592,8 @@ GET /usage/v1/sessions/:id
   "message": "Session retrieved"
 }
 ```
+
+Session detail also returns `tools`, the session's activity per tool in the same shape as `GET /usage/v1/tools` (`[]` when none was sent).
 
 `models` follows the same rules as in the session list. `overhead` is the last overhead the app sent for the session, or `null` if it never sent one.
 

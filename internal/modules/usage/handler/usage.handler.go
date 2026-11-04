@@ -119,6 +119,19 @@ func (h *Handler) Timeseries(c *gin.Context) {
 	response.Success(c, http.StatusOK, "Timeseries retrieved", res)
 }
 
+func (h *Handler) Tools(c *gin.Context) {
+	who, q, ok := reportRequest[dto.ReportQuery](c)
+	if !ok {
+		return
+	}
+	res, err := h.service.Tools(c.Request.Context(), who, q)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	response.Success(c, http.StatusOK, "Tools retrieved", res)
+}
+
 func (h *Handler) Models(c *gin.Context) {
 	who, q, ok := reportRequest[dto.ReportQuery](c)
 	if !ok {

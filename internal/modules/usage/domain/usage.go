@@ -34,6 +34,26 @@ type HourUsage struct {
 	CacheReadTokens      int64     `json:"cache_read_tokens"`
 }
 
+type ToolUsage struct {
+	Hour         time.Time `json:"hour"`
+	Tool         string    `json:"tool"`
+	Calls        int32     `json:"calls"`
+	LinesAdded   int64     `json:"lines_added"`
+	LinesRemoved int64     `json:"lines_removed"`
+	Commits      int32     `json:"commits"`
+}
+
+type PlanWindow struct {
+	UsedPercentage float64 `json:"used_percentage"`
+	ResetsAt       int64   `json:"resets_at"`
+}
+
+type PlanLimits struct {
+	FiveHour   *PlanWindow `json:"five_hour"`
+	SevenDay   *PlanWindow `json:"seven_day"`
+	CapturedAt int64       `json:"captured_at"`
+}
+
 type Overhead struct {
 	SystemTokens int64 `json:"system_tokens"`
 	MemoryTokens int64 `json:"memory_tokens"`

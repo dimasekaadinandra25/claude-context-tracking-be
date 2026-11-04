@@ -100,16 +100,32 @@ func (r *Repository) Overview(ctx context.Context, q dto.ReportQuery) ([]dto.Per
 			WHERE ($3::uuid IS NULL OR user_id = $3::uuid) AND EXISTS (
 				SELECT 1 FROM usage.session_hours h WHERE h.session_id = s.id AND h.hour >= $1 AND h.hour < $2)
 			GROUP BY user_id
+		), t AS (
+			SELECT user_id,
+			       SUM(lines_added)::bigint AS lines_added,
+			       SUM(lines_removed)::bigint AS lines_removed,
+			       SUM(commits)::bigint AS commits
+			FROM usage.session_tool_hours
+			WHERE hour >= $1 AND hour < $2 AND ($3::uuid IS NULL OR user_id = $3::uuid)
+			GROUP BY user_id
 		)
 		SELECT u.id::text, COALESCE(u.full_name, ''), u.email, COALESCE(ls.model, ''),
 		       COALESCE(h.new_context, 0), COALESCE(h.requests, 0), COALESCE(h.sessions, 0),
 		       COALESCE(h.output_tokens, 0), COALESCE(h.subagent_requests, 0), COALESCE(h.subagent_output_tokens, 0),
 		       COALESCE(h.input_tokens, 0), COALESCE(h.cache_write_tokens, 0), COALESCE(h.cache_read_tokens, 0),
 		       COALESCE(st.near_full, 0), COALESCE(st.compactions, 0),
+		       COALESCE(t.lines_added, 0), COALESCE(t.lines_removed, 0), COALESCE(t.commits, 0),
+		       CASE WHEN pl.five_hour_resets_at > NOW() THEN pl.five_hour_used END,
+		       CASE WHEN pl.five_hour_resets_at > NOW() THEN pl.five_hour_resets_at END,
+		       CASE WHEN pl.seven_day_resets_at > NOW() THEN pl.seven_day_used END,
+		       CASE WHEN pl.seven_day_resets_at > NOW() THEN pl.seven_day_resets_at END,
+		       pl.captured_at,
 		       ls.last_request_at, k.last_used_at, k.app_version, COALESCE(u.is_active, FALSE)
 		FROM core.users u
 		LEFT JOIN h ON h.user_id = u.id
 		LEFT JOIN st ON st.user_id = u.id
+		LEFT JOIN t ON t.user_id = u.id
+		LEFT JOIN usage.plan_limits pl ON pl.user_id = u.id
 		LEFT JOIN LATERAL (
 			SELECT s.model, s.last_request_at FROM usage.sessions s
 			WHERE s.user_id = u.id ORDER BY s.last_request_at DESC LIMIT 1
@@ -130,6 +146,8 @@ func (r *Repository) Overview(ctx context.Context, q dto.ReportQuery) ([]dto.Per
 			&p.NewContext, &p.Requests, &p.Sessions,
 			&p.OutputTokens, &p.SubagentRequests, &p.SubagentOutputTokens,
 			&p.InputTokens, &p.CacheWriteTokens, &p.CacheReadTokens, &p.SessionsNearFull, &p.Compactions,
+			&p.LinesAdded, &p.LinesRemoved, &p.Commits,
+			&p.FiveHourUsed, &p.FiveHourResetsAt, &p.SevenDayUsed, &p.SevenDayResetsAt, &p.LimitsCapturedAt,
 			&p.LastRequestAt, &p.LastSyncedAt, &p.AppVersion, &p.IsActive)
 		return p, err
 	})
@@ -174,6 +192,29 @@ func (r *Repository) Models(ctx context.Context, q dto.ReportQuery) ([]dto.Model
 		err := row.Scan(&m.Model, &m.NewContext, &m.Requests, &m.Sessions, &m.OutputTokens, &m.SubagentRequests, &m.SubagentOutputTokens)
 		return m, err
 	})
+}
+
+func scanToolSummaries(rows pgx.Rows) ([]dto.ToolSummary, error) {
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (dto.ToolSummary, error) {
+		var t dto.ToolSummary
+		err := row.Scan(&t.Tool, &t.Calls, &t.LinesAdded, &t.LinesRemoved, &t.Commits)
+		return t, err
+	})
+}
+
+func (r *Repository) Tools(ctx context.Context, q dto.ReportQuery) ([]dto.ToolSummary, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT tool, SUM(calls)::bigint, SUM(lines_added)::bigint, SUM(lines_removed)::bigint, SUM(commits)::bigint
+		FROM usage.session_tool_hours
+		JOIN core.users u ON u.id = user_id
+		WHERE hour >= $1 AND hour < $2 AND ($3::uuid IS NULL OR user_id = $3::uuid) AND u.deleted_at IS NULL
+		GROUP BY tool
+		ORDER BY 2 DESC, tool`,
+		q.From, q.To, userFilter(q.UserID))
+	if err != nil {
+		return nil, err
+	}
+	return scanToolSummaries(rows)
 }
 
 func (r *Repository) Sessions(ctx context.Context, q dto.SessionQuery, limit, offset int) ([]dto.SessionRow, int64, error) {
@@ -247,6 +288,19 @@ func (r *Repository) Session(ctx context.Context, id string) (dto.SessionDetail,
 	}
 	detail := dto.SessionDetail{Session: found.Session, UserName: found.UserName, Models: found.Models, Hours: hours}
 	err = r.db.QueryRow(ctx, `SELECT `+overheadJSON+` FROM usage.sessions s WHERE s.id = $1`, id).Scan(&detail.Overhead)
+	if err != nil {
+		return dto.SessionDetail{}, err
+	}
+	rows, err = r.db.Query(ctx, `
+		SELECT tool, SUM(calls)::bigint, SUM(lines_added)::bigint, SUM(lines_removed)::bigint, SUM(commits)::bigint
+		FROM usage.session_tool_hours
+		WHERE session_id = $1
+		GROUP BY tool
+		ORDER BY 2 DESC, tool`, id)
+	if err != nil {
+		return dto.SessionDetail{}, err
+	}
+	detail.Tools, err = scanToolSummaries(rows)
 	return detail, err
 }
 

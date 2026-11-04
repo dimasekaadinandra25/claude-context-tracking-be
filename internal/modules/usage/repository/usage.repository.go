@@ -60,7 +60,58 @@ const insertHours = `
 		AS h(hour, model, new_context, requests, output_tokens, subagent_requests, subagent_output_tokens, input_tokens, cache_write_tokens, cache_read_tokens)
 	ON CONFLICT (session_id, hour, model) DO NOTHING`
 
-func (r *Repository) SaveSession(ctx context.Context, s domain.Session, overhead *domain.Overhead, hours []domain.HourUsage) (bool, error) {
+const insertTools = `
+	INSERT INTO usage.session_tool_hours (session_id, hour, tool, user_id, calls, lines_added, lines_removed, commits)
+	SELECT $1, t.hour, t.tool, $2, t.calls, t.lines_added, t.lines_removed, t.commits
+	FROM unnest($3::timestamptz[], $4::text[], $5::int[], $6::bigint[], $7::bigint[], $8::int[])
+		AS t(hour, tool, calls, lines_added, lines_removed, commits)
+	ON CONFLICT (session_id, hour, tool) DO NOTHING`
+
+const upsertPlanLimits = `
+	INSERT INTO usage.plan_limits (user_id, five_hour_used, five_hour_resets_at, seven_day_used, seven_day_resets_at, captured_at)
+	VALUES ($1, $2, $3, $4, $5, $6)
+	ON CONFLICT (user_id) DO UPDATE SET
+		five_hour_used = EXCLUDED.five_hour_used,
+		five_hour_resets_at = EXCLUDED.five_hour_resets_at,
+		seven_day_used = EXCLUDED.seven_day_used,
+		seven_day_resets_at = EXCLUDED.seven_day_resets_at,
+		captured_at = EXCLUDED.captured_at
+	WHERE EXCLUDED.captured_at >= usage.plan_limits.captured_at`
+
+func planWindow(w *domain.PlanWindow) (*float64, *time.Time) {
+	if w == nil {
+		return nil, nil
+	}
+	resetsAt := time.Unix(w.ResetsAt, 0).UTC()
+	return &w.UsedPercentage, &resetsAt
+}
+
+func (r *Repository) SavePlanLimits(ctx context.Context, userID string, limits domain.PlanLimits) error {
+	fiveUsed, fiveResets := planWindow(limits.FiveHour)
+	sevenUsed, sevenResets := planWindow(limits.SevenDay)
+	_, err := r.db.Exec(ctx, upsertPlanLimits, userID, fiveUsed, fiveResets, sevenUsed, sevenResets, time.Unix(limits.CapturedAt, 0).UTC())
+	return err
+}
+
+func replaceTools(ctx context.Context, tx pgx.Tx, sessionID, userID string, tools []domain.ToolUsage) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM usage.session_tool_hours WHERE session_id = $1`, sessionID); err != nil {
+		return err
+	}
+	at := make([]time.Time, len(tools))
+	names := make([]string, len(tools))
+	calls := make([]int32, len(tools))
+	added := make([]int64, len(tools))
+	removed := make([]int64, len(tools))
+	commits := make([]int32, len(tools))
+	for i, t := range tools {
+		at[i], names[i], calls[i] = t.Hour, t.Tool, t.Calls
+		added[i], removed[i], commits[i] = t.LinesAdded, t.LinesRemoved, t.Commits
+	}
+	_, err := tx.Exec(ctx, insertTools, sessionID, userID, at, names, calls, added, removed, commits)
+	return err
+}
+
+func (r *Repository) SaveSession(ctx context.Context, s domain.Session, overhead *domain.Overhead, hours []domain.HourUsage, tools []domain.ToolUsage) (bool, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return false, err
@@ -107,6 +158,11 @@ func (r *Repository) SaveSession(ctx context.Context, s domain.Session, overhead
 	}
 	if _, err := tx.Exec(ctx, insertHours, s.ID, at, models, newContext, requests, s.UserID, output, subRequests, subOutput, input, cacheWrite, cacheRead); err != nil {
 		return false, err
+	}
+	if tools != nil {
+		if err := replaceTools(ctx, tx, s.ID, s.UserID, tools); err != nil {
+			return false, err
+		}
 	}
 	return true, tx.Commit(ctx)
 }

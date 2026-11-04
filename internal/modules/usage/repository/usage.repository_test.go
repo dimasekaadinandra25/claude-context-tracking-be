@@ -48,12 +48,12 @@ func TestSaveSessionUpsertsAbsoluteValues(t *testing.T) {
 		{Hour: at("2026-10-30T02:00:00Z"), Model: "opus", NewContext: 40000, Requests: 120},
 		{Hour: at("2026-10-30T06:00:00Z"), Model: "sonnet", NewContext: 8000, Requests: 30},
 	}
-	if owned, err := repo.SaveSession(ctx, session("s1", userID, 64000), nil, hours); err != nil || !owned {
+	if owned, err := repo.SaveSession(ctx, session("s1", userID, 64000), nil, hours, nil); err != nil || !owned {
 		t.Fatalf("first save: owned=%v err=%v", owned, err)
 	}
 
 	hours[1].NewContext = 14000
-	if owned, err := repo.SaveSession(ctx, session("s1", userID, 70000), nil, hours); err != nil || !owned {
+	if owned, err := repo.SaveSession(ctx, session("s1", userID, 70000), nil, hours, nil); err != nil || !owned {
 		t.Fatalf("second save: owned=%v err=%v", owned, err)
 	}
 
@@ -85,12 +85,12 @@ func TestSaveSessionRefusesOtherOwner(t *testing.T) {
 	repo := repository.New(pool)
 
 	hours := []domain.HourUsage{{Hour: at("2026-10-30T02:00:00Z"), Model: "opus", NewContext: 40000, Requests: 120}}
-	if owned, err := repo.SaveSession(ctx, session("s1", a, 40000), nil, hours); err != nil || !owned {
+	if owned, err := repo.SaveSession(ctx, session("s1", a, 40000), nil, hours, nil); err != nil || !owned {
 		t.Fatalf("save as A: owned=%v err=%v", owned, err)
 	}
 
 	stolen := []domain.HourUsage{{Hour: at("2026-10-30T02:00:00Z"), Model: "opus", NewContext: 1, Requests: 1}}
-	owned, err := repo.SaveSession(ctx, session("s1", b, 1), nil, stolen)
+	owned, err := repo.SaveSession(ctx, session("s1", b, 1), nil, stolen, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,14 +126,14 @@ func TestSaveSessionDropsHoursMissingFromPayload(t *testing.T) {
 		{Hour: at("2026-10-30T01:00:00Z"), Model: "old", NewContext: 100, Requests: 1},
 		{Hour: at("2026-10-30T02:00:00Z"), Model: "m", NewContext: 200, Requests: 1},
 	}
-	if owned, err := repo.SaveSession(ctx, session("s1", userID, 300), nil, first); err != nil || !owned {
+	if owned, err := repo.SaveSession(ctx, session("s1", userID, 300), nil, first, nil); err != nil || !owned {
 		t.Fatalf("first save: owned=%v err=%v", owned, err)
 	}
 	second := []domain.HourUsage{
 		{Hour: at("2026-10-30T01:00:00Z"), Model: "m", NewContext: 100, Requests: 1},
 		{Hour: at("2026-10-30T02:00:00Z"), Model: "m", NewContext: 200, Requests: 1},
 	}
-	if owned, err := repo.SaveSession(ctx, session("s1", userID, 300), nil, second); err != nil || !owned {
+	if owned, err := repo.SaveSession(ctx, session("s1", userID, 300), nil, second, nil); err != nil || !owned {
 		t.Fatalf("second save: owned=%v err=%v", owned, err)
 	}
 
@@ -158,7 +158,7 @@ func TestSaveSessionToleratesDuplicateHours(t *testing.T) {
 		{Hour: at("2026-10-30T01:00:00Z"), Model: "m", NewContext: 100, Requests: 1},
 		{Hour: at("2026-10-30T01:00:00Z"), Model: "m", NewContext: 100, Requests: 1},
 	}
-	if owned, err := repo.SaveSession(ctx, session("s1", userID, 100), nil, hours); err != nil || !owned {
+	if owned, err := repo.SaveSession(ctx, session("s1", userID, 100), nil, hours, nil); err != nil || !owned {
 		t.Fatalf("save: owned=%v err=%v", owned, err)
 	}
 }

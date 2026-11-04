@@ -39,6 +39,14 @@ type PersonSummary struct {
 	CacheReadTokens      int64      `json:"cache_read_tokens"`
 	SessionsNearFull     int64      `json:"sessions_near_full"`
 	Compactions          int64      `json:"compactions"`
+	LinesAdded           int64      `json:"lines_added"`
+	LinesRemoved         int64      `json:"lines_removed"`
+	Commits              int64      `json:"commits"`
+	FiveHourUsed         *float64   `json:"five_hour_used"`
+	FiveHourResetsAt     *time.Time `json:"five_hour_resets_at"`
+	SevenDayUsed         *float64   `json:"seven_day_used"`
+	SevenDayResetsAt     *time.Time `json:"seven_day_resets_at"`
+	LimitsCapturedAt     *time.Time `json:"limits_captured_at"`
 	LastRequestAt        *time.Time `json:"last_request_at"`
 	LastSyncedAt         *time.Time `json:"last_synced_at"`
 	AppVersion           *string    `json:"app_version"`
@@ -59,6 +67,9 @@ type Overview struct {
 	TotalCacheReadTokens      int64           `json:"total_cache_read_tokens"`
 	TotalSessionsNearFull     int64           `json:"total_sessions_near_full"`
 	TotalCompactions          int64           `json:"total_compactions"`
+	TotalLinesAdded           int64           `json:"total_lines_added"`
+	TotalLinesRemoved         int64           `json:"total_lines_removed"`
+	TotalCommits              int64           `json:"total_commits"`
 }
 
 type Point struct {
@@ -79,6 +90,14 @@ type ModelSummary struct {
 	OutputTokens         int64  `json:"output_tokens"`
 	SubagentRequests     int64  `json:"subagent_requests"`
 	SubagentOutputTokens int64  `json:"subagent_output_tokens"`
+}
+
+type ToolSummary struct {
+	Tool         string `json:"tool"`
+	Calls        int64  `json:"calls"`
+	LinesAdded   int64  `json:"lines_added"`
+	LinesRemoved int64  `json:"lines_removed"`
+	Commits      int64  `json:"commits"`
 }
 
 type SessionQuery struct {
@@ -120,6 +139,7 @@ type SessionDetail struct {
 	Models   []string           `json:"models"`
 	Hours    []domain.HourUsage `json:"hours"`
 	Overhead *domain.Overhead   `json:"overhead"`
+	Tools    []ToolSummary      `json:"tools"`
 }
 
 type ProjectSummary struct {

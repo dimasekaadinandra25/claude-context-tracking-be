@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"claude-usage-server/internal/modules/usage/domain"
@@ -19,6 +20,9 @@ const (
 	maxIDLength    = 100
 	maxModelSize   = 100
 	maxMachineSize = 255
+	maxToolName    = 100
+	maxPercent     = 100
+	maxClockSkew   = 24 * time.Hour
 )
 
 var appVersionPattern = regexp.MustCompile(`^[0-9A-Za-z.+_-]{1,32}$`)
@@ -42,7 +46,7 @@ func (s *Service) Ingest(ctx context.Context, userID string, req dto.IngestReque
 			res.Rejected = append(res.Rejected, dto.Rejection{SessionID: p.SessionID, Reason: err.Error()})
 			continue
 		}
-		owned, err := s.repo.SaveSession(ctx, toSession(userID, req.Machine, p), p.Overhead, toHours(p.Hours))
+		owned, err := s.repo.SaveSession(ctx, toSession(userID, req.Machine, p), p.Overhead, toHours(p.Hours), toTools(p.Tools))
 		if err != nil {
 			return dto.IngestResponse{}, err
 		}
@@ -52,7 +56,30 @@ func (s *Service) Ingest(ctx context.Context, userID string, req dto.IngestReque
 		}
 		res.Accepted++
 	}
+	if limits, ok := decodePlanLimits(req.PlanLimits, time.Now()); ok {
+		if err := s.repo.SavePlanLimits(ctx, userID, limits); err != nil {
+			return dto.IngestResponse{}, err
+		}
+	}
 	return res, nil
+}
+
+func decodePlanLimits(raw json.RawMessage, now time.Time) (domain.PlanLimits, bool) {
+	var limits domain.PlanLimits
+	if len(raw) == 0 || json.Unmarshal(raw, &limits) != nil {
+		return limits, false
+	}
+	if limits.FiveHour == nil && limits.SevenDay == nil {
+		return limits, false
+	}
+	if limits.CapturedAt <= 0 || limits.CapturedAt > now.Add(maxClockSkew).Unix() {
+		return limits, false
+	}
+	return limits, validWindow(limits.FiveHour) && validWindow(limits.SevenDay)
+}
+
+func validWindow(w *domain.PlanWindow) bool {
+	return w == nil || (w.UsedPercentage >= 0 && w.UsedPercentage <= maxPercent && w.ResetsAt > 0)
 }
 
 func (s *Service) RecordAppVersion(ctx context.Context, keyID, version string) error {
@@ -138,6 +165,38 @@ func validate(s dto.SessionPayload) error {
 		}
 		seen[k] = true
 	}
+	return validateTools(s.Tools)
+}
+
+func validateTools(tools []dto.ToolPayload) error {
+	if len(tools) > maxHours {
+		return fmt.Errorf("at most %d tool rows per session", maxHours)
+	}
+	type toolKey struct {
+		hour int64
+		tool string
+	}
+	seen := make(map[toolKey]bool, len(tools))
+	for _, t := range tools {
+		u := t.Hour.UTC()
+		if t.Hour.IsZero() || u.Minute() != 0 || u.Second() != 0 || u.Nanosecond() != 0 {
+			return errors.New("hour must be a whole UTC hour")
+		}
+		if n := utf8.RuneCountInString(t.Tool); n < 1 || n > maxToolName {
+			return fmt.Errorf("tool must be 1-%d characters", maxToolName)
+		}
+		if strings.ContainsRune(t.Tool, 0) {
+			return errors.New("tool must not contain NUL characters")
+		}
+		if t.Calls < 0 || t.LinesAdded < 0 || t.LinesRemoved < 0 || t.Commits < 0 {
+			return errors.New("numbers must be >= 0")
+		}
+		k := toolKey{u.Unix(), t.Tool}
+		if seen[k] {
+			return errors.New("duplicate hour and tool")
+		}
+		seen[k] = true
+	}
 	return nil
 }
 
@@ -185,6 +244,24 @@ func toHours(in []dto.HourPayload) []domain.HourUsage {
 			InputTokens:          h.InputTokens,
 			CacheWriteTokens:     h.CacheWriteTokens,
 			CacheReadTokens:      h.CacheReadTokens,
+		}
+	}
+	return out
+}
+
+func toTools(in []dto.ToolPayload) []domain.ToolUsage {
+	if in == nil {
+		return nil
+	}
+	out := make([]domain.ToolUsage, len(in))
+	for i, t := range in {
+		out[i] = domain.ToolUsage{
+			Hour:         t.Hour.UTC(),
+			Tool:         t.Tool,
+			Calls:        t.Calls,
+			LinesAdded:   t.LinesAdded,
+			LinesRemoved: t.LinesRemoved,
+			Commits:      t.Commits,
 		}
 	}
 	return out

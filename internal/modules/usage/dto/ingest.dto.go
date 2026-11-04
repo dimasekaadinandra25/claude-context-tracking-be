@@ -11,6 +11,7 @@ type IngestRequest struct {
 	Machine    string            `json:"machine" binding:"required"`
 	AppVersion string            `json:"app_version"`
 	Sessions   []json.RawMessage `json:"sessions" binding:"max=200"`
+	PlanLimits json.RawMessage   `json:"plan_limits"`
 }
 
 type SessionPayload struct {
@@ -29,6 +30,16 @@ type SessionPayload struct {
 	LatestAt      time.Time        `json:"latest_at"`
 	Hours         []HourPayload    `json:"hours"`
 	Overhead      *domain.Overhead `json:"overhead"`
+	Tools         []ToolPayload    `json:"tools"`
+}
+
+type ToolPayload struct {
+	Hour         time.Time `json:"hour"`
+	Tool         string    `json:"tool"`
+	Calls        int32     `json:"calls"`
+	LinesAdded   int64     `json:"lines_added"`
+	LinesRemoved int64     `json:"lines_removed"`
+	Commits      int32     `json:"commits"`
 }
 
 type HourPayload struct {

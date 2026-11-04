@@ -88,6 +88,9 @@ func (s *Service) Overview(ctx context.Context, c dto.Caller, q dto.ReportQuery)
 		ov.TotalCacheReadTokens += p.CacheReadTokens
 		ov.TotalSessionsNearFull += p.SessionsNearFull
 		ov.TotalCompactions += p.Compactions
+		ov.TotalLinesAdded += p.LinesAdded
+		ov.TotalLinesRemoved += p.LinesRemoved
+		ov.TotalCommits += p.Commits
 		if p.NewContext > 0 {
 			ov.ActivePeople++
 		}
@@ -119,6 +122,14 @@ func (s *Service) Models(ctx context.Context, c dto.Caller, q dto.ReportQuery) (
 		return nil, err
 	}
 	return s.repo.Models(ctx, q)
+}
+
+func (s *Service) Tools(ctx context.Context, c dto.Caller, q dto.ReportQuery) ([]dto.ToolSummary, error) {
+	q, _, err := s.prepare(c, q)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.Tools(ctx, q)
 }
 
 func (s *Service) Projects(ctx context.Context, c dto.Caller, q dto.ReportQuery) ([]dto.ProjectSummary, error) {
