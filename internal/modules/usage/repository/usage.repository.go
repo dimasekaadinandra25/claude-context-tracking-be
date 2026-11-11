@@ -78,6 +78,17 @@ const upsertPlanLimits = `
 		captured_at = EXCLUDED.captured_at
 	WHERE EXCLUDED.captured_at >= usage.plan_limits.captured_at`
 
+const insertPlanReading = `
+	INSERT INTO usage.plan_limit_readings (user_id, captured_at, five_hour_used, seven_day_used, seven_day_resets_at)
+	VALUES ($1, $2, $3, $4, $5)
+	ON CONFLICT DO NOTHING`
+
+const upsertClaudeAccount = `
+	INSERT INTO usage.claude_accounts (user_id, email, plan, tier, updated_at)
+	VALUES ($1, $2, $3, $4, NOW())
+	ON CONFLICT (user_id) DO UPDATE SET
+		email = EXCLUDED.email, plan = EXCLUDED.plan, tier = EXCLUDED.tier, updated_at = NOW()`
+
 func planWindow(w *domain.PlanWindow) (*float64, *time.Time) {
 	if w == nil {
 		return nil, nil
@@ -89,7 +100,15 @@ func planWindow(w *domain.PlanWindow) (*float64, *time.Time) {
 func (r *Repository) SavePlanLimits(ctx context.Context, userID string, limits domain.PlanLimits) error {
 	fiveUsed, fiveResets := planWindow(limits.FiveHour)
 	sevenUsed, sevenResets := planWindow(limits.SevenDay)
-	_, err := r.db.Exec(ctx, upsertPlanLimits, userID, fiveUsed, fiveResets, sevenUsed, sevenResets, time.Unix(limits.CapturedAt, 0).UTC())
+	capturedAt := time.Unix(limits.CapturedAt, 0).UTC()
+	batch := &pgx.Batch{}
+	batch.Queue(upsertPlanLimits, userID, fiveUsed, fiveResets, sevenUsed, sevenResets, capturedAt)
+	batch.Queue(insertPlanReading, userID, capturedAt, fiveUsed, sevenUsed, sevenResets)
+	return r.db.SendBatch(ctx, batch).Close()
+}
+
+func (r *Repository) SaveClaudeAccount(ctx context.Context, userID string, a domain.ClaudeAccount) error {
+	_, err := r.db.Exec(ctx, upsertClaudeAccount, userID, a.Email, a.Plan, a.Tier)
 	return err
 }
 

@@ -38,7 +38,7 @@ func Open(t *testing.T) *pgxpool.Pool {
 	})
 
 	if _, err := pool.Exec(ctx, `
-		TRUNCATE usage.plan_limits, usage.session_tool_hours, usage.budgets, usage.session_hours, usage.sessions, core.api_keys;
+		TRUNCATE usage.claude_accounts, usage.plan_limit_readings, usage.plan_limits, usage.session_tool_hours, usage.budgets, usage.session_hours, usage.sessions, core.api_keys;
 		DELETE FROM core.users WHERE username <> 'admin';`); err != nil {
 		t.Fatal(err)
 	}

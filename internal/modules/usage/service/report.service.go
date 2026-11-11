@@ -132,6 +132,14 @@ func (s *Service) Tools(ctx context.Context, c dto.Caller, q dto.ReportQuery) ([
 	return s.repo.Tools(ctx, q)
 }
 
+func (s *Service) Daily(ctx context.Context, c dto.Caller, q dto.ReportQuery) ([]dto.DailyUsage, error) {
+	q, _, err := s.prepare(c, q)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.Daily(ctx, q)
+}
+
 func (s *Service) Projects(ctx context.Context, c dto.Caller, q dto.ReportQuery) ([]dto.ProjectSummary, error) {
 	q, _, err := s.prepare(c, q)
 	if err != nil {

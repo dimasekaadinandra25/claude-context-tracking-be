@@ -12,6 +12,7 @@ type IngestRequest struct {
 	AppVersion string            `json:"app_version"`
 	Sessions   []json.RawMessage `json:"sessions" binding:"max=200"`
 	PlanLimits json.RawMessage   `json:"plan_limits"`
+	Account    json.RawMessage   `json:"account"`
 }
 
 type SessionPayload struct {

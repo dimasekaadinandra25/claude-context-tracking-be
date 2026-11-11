@@ -132,6 +132,19 @@ func (h *Handler) Tools(c *gin.Context) {
 	response.Success(c, http.StatusOK, "Tools retrieved", res)
 }
 
+func (h *Handler) Daily(c *gin.Context) {
+	who, q, ok := reportRequest[dto.ReportQuery](c)
+	if !ok {
+		return
+	}
+	res, err := h.service.Daily(c.Request.Context(), who, q)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	response.Success(c, http.StatusOK, "Daily usage retrieved", res)
+}
+
 func (h *Handler) Models(c *gin.Context) {
 	who, q, ok := reportRequest[dto.ReportQuery](c)
 	if !ok {

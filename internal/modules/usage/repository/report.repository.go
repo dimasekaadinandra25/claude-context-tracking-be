@@ -119,13 +119,20 @@ func (r *Repository) Overview(ctx context.Context, q dto.ReportQuery) ([]dto.Per
 		       CASE WHEN pl.five_hour_resets_at > NOW() THEN pl.five_hour_resets_at END,
 		       CASE WHEN pl.seven_day_resets_at > NOW() THEN pl.seven_day_used END,
 		       CASE WHEN pl.seven_day_resets_at > NOW() THEN pl.seven_day_resets_at END,
-		       pl.captured_at,
+		       pl.captured_at, NULLIF(ca.email, ''), NULLIF(ca.plan, ''), NULLIF(ca.tier, ''),
 		       ls.last_request_at, k.last_used_at, k.app_version, COALESCE(u.is_active, FALSE)
 		FROM core.users u
 		LEFT JOIN h ON h.user_id = u.id
 		LEFT JOIN st ON st.user_id = u.id
 		LEFT JOIN t ON t.user_id = u.id
-		LEFT JOIN usage.plan_limits pl ON pl.user_id = u.id
+		LEFT JOIN usage.claude_accounts ca ON ca.user_id = u.id
+		LEFT JOIN LATERAL (
+			SELECT p.* FROM usage.plan_limits p
+			LEFT JOIN usage.claude_accounts pa ON pa.user_id = p.user_id
+			WHERE p.user_id = u.id OR (ca.email <> '' AND LOWER(pa.email) = LOWER(ca.email))
+			ORDER BY p.captured_at DESC
+			LIMIT 1
+		) pl ON TRUE
 		LEFT JOIN LATERAL (
 			SELECT s.model, s.last_request_at FROM usage.sessions s
 			WHERE s.user_id = u.id ORDER BY s.last_request_at DESC LIMIT 1
@@ -148,6 +155,7 @@ func (r *Repository) Overview(ctx context.Context, q dto.ReportQuery) ([]dto.Per
 			&p.InputTokens, &p.CacheWriteTokens, &p.CacheReadTokens, &p.SessionsNearFull, &p.Compactions,
 			&p.LinesAdded, &p.LinesRemoved, &p.Commits,
 			&p.FiveHourUsed, &p.FiveHourResetsAt, &p.SevenDayUsed, &p.SevenDayResetsAt, &p.LimitsCapturedAt,
+			&p.ClaudeEmail, &p.ClaudePlan, &p.ClaudeTier,
 			&p.LastRequestAt, &p.LastSyncedAt, &p.AppVersion, &p.IsActive)
 		return p, err
 	})
@@ -177,7 +185,8 @@ func (r *Repository) Timeseries(ctx context.Context, q dto.ReportQuery, interval
 func (r *Repository) Models(ctx context.Context, q dto.ReportQuery) ([]dto.ModelSummary, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT model, SUM(new_context)::bigint, SUM(requests)::bigint, COUNT(DISTINCT session_id),
-		       SUM(output_tokens)::bigint, SUM(subagent_requests)::bigint, SUM(subagent_output_tokens)::bigint
+		       SUM(output_tokens)::bigint, SUM(subagent_requests)::bigint, SUM(subagent_output_tokens)::bigint,
+		       SUM(input_tokens)::bigint, SUM(cache_write_tokens)::bigint, SUM(cache_read_tokens)::bigint
 		FROM usage.session_hours
 		JOIN core.users u ON u.id = user_id
 		WHERE hour >= $1 AND hour < $2 AND ($3::uuid IS NULL OR user_id = $3::uuid) AND u.deleted_at IS NULL
@@ -189,7 +198,8 @@ func (r *Repository) Models(ctx context.Context, q dto.ReportQuery) ([]dto.Model
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (dto.ModelSummary, error) {
 		var m dto.ModelSummary
-		err := row.Scan(&m.Model, &m.NewContext, &m.Requests, &m.Sessions, &m.OutputTokens, &m.SubagentRequests, &m.SubagentOutputTokens)
+		err := row.Scan(&m.Model, &m.NewContext, &m.Requests, &m.Sessions, &m.OutputTokens, &m.SubagentRequests, &m.SubagentOutputTokens,
+			&m.InputTokens, &m.CacheWriteTokens, &m.CacheReadTokens)
 		return m, err
 	})
 }
@@ -215,6 +225,79 @@ func (r *Repository) Tools(ctx context.Context, q dto.ReportQuery) ([]dto.ToolSu
 		return nil, err
 	}
 	return scanToolSummaries(rows)
+}
+
+func (r *Repository) Daily(ctx context.Context, q dto.ReportQuery) ([]dto.DailyUsage, error) {
+	rows, err := r.db.Query(ctx, `
+		WITH accounts AS (
+			SELECT u.id AS user_id, COALESCE(NULLIF(LOWER(ca.email), ''), u.id::text) AS account
+			FROM core.users u
+			LEFT JOIN usage.claude_accounts ca ON ca.user_id = u.id
+			WHERE u.deleted_at IS NULL
+		), scope AS (
+			SELECT DISTINCT account FROM accounts WHERE $4::uuid IS NULL OR user_id = $4::uuid
+		), tokens AS (
+			SELECT h.user_id, a.account, (h.hour AT TIME ZONE $3)::date AS day,
+			       SUM(h.input_tokens)::bigint AS input_tokens,
+			       SUM(h.cache_write_tokens)::bigint AS cache_write_tokens,
+			       SUM(h.cache_read_tokens)::bigint AS cache_read_tokens,
+			       SUM(h.output_tokens)::bigint AS output_tokens,
+			       SUM(h.requests)::bigint AS requests,
+			       SUM(h.input_tokens + h.cache_write_tokens + h.cache_read_tokens + 5 * h.output_tokens)::bigint AS weight
+			FROM usage.session_hours h
+			JOIN accounts a ON a.user_id = h.user_id
+			WHERE h.hour >= $1 AND h.hour < $2 AND a.account IN (SELECT account FROM scope)
+			GROUP BY 1, 2, 3
+		), readings AS (
+			SELECT a.account, r.captured_at, r.seven_day_used, r.seven_day_resets_at,
+			       LAG(r.seven_day_used) OVER w AS previous_used,
+			       LAG(r.seven_day_resets_at) OVER w AS previous_resets_at
+			FROM usage.plan_limit_readings r
+			JOIN accounts a ON a.user_id = r.user_id
+			WHERE r.captured_at >= $1::timestamptz - INTERVAL '8 days' AND r.captured_at < $2
+			  AND r.seven_day_used IS NOT NULL AND a.account IN (SELECT account FROM scope)
+			WINDOW w AS (PARTITION BY a.account ORDER BY r.captured_at)
+		), limits AS (
+			SELECT account, (captured_at AT TIME ZONE $3)::date AS day,
+			       (ARRAY_AGG(seven_day_used ORDER BY captured_at DESC))[1] AS seven_day_used,
+			       SUM(CASE
+			           WHEN ABS(EXTRACT(EPOCH FROM seven_day_resets_at - previous_resets_at)) < 3600
+			           THEN GREATEST(0, seven_day_used - previous_used)
+			           WHEN previous_resets_at IS NOT NULL OR captured_at < seven_day_resets_at - INTERVAL '6 days'
+			           THEN seven_day_used END) AS limit_used
+			FROM readings
+			GROUP BY 1, 2
+		), account_days AS (
+			SELECT account, day, SUM(weight)::bigint AS weight FROM tokens GROUP BY 1, 2
+		), members AS (
+			SELECT account, COUNT(*)::int AS members FROM accounts GROUP BY account
+		), member_days AS (
+			SELECT a.user_id, a.account, d.day
+			FROM accounts a
+			JOIN (SELECT account, day FROM limits UNION SELECT account, day FROM account_days) d ON d.account = a.account
+			WHERE $4::uuid IS NULL OR a.user_id = $4::uuid
+		)
+		SELECT md.user_id::text, to_char(md.day, 'YYYY-MM-DD'),
+		       COALESCE(t.input_tokens, 0), COALESCE(t.cache_write_tokens, 0), COALESCE(t.cache_read_tokens, 0),
+		       COALESCE(t.output_tokens, 0), COALESCE(t.requests, 0),
+		       l.seven_day_used, l.limit_used, COALESCE(ad.weight, 0), m.members
+		FROM member_days md
+		JOIN members m ON m.account = md.account
+		LEFT JOIN tokens t ON t.user_id = md.user_id AND t.day = md.day
+		LEFT JOIN limits l ON l.account = md.account AND l.day = md.day
+		LEFT JOIN account_days ad ON ad.account = md.account AND ad.day = md.day
+		WHERE md.day >= ($1::timestamptz AT TIME ZONE $3)::date
+		ORDER BY 1, 2`,
+		q.From, q.To, q.TZ, userFilter(q.UserID))
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (dto.DailyUsage, error) {
+		var d dto.DailyUsage
+		err := row.Scan(&d.UserID, &d.Day, &d.InputTokens, &d.CacheWriteTokens, &d.CacheReadTokens,
+			&d.OutputTokens, &d.Requests, &d.SevenDayUsed, &d.LimitUsed, &d.AccountWeight, &d.AccountMembers)
+		return d, err
+	})
 }
 
 func (r *Repository) Sessions(ctx context.Context, q dto.SessionQuery, limit, offset int) ([]dto.SessionRow, int64, error) {

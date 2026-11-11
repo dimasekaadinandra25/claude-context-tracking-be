@@ -48,6 +48,12 @@ type PlanWindow struct {
 	ResetsAt       int64   `json:"resets_at"`
 }
 
+type ClaudeAccount struct {
+	Email string `json:"email"`
+	Plan  string `json:"plan"`
+	Tier  string `json:"tier"`
+}
+
 type PlanLimits struct {
 	FiveHour   *PlanWindow `json:"five_hour"`
 	SevenDay   *PlanWindow `json:"seven_day"`

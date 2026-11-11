@@ -47,6 +47,9 @@ type PersonSummary struct {
 	SevenDayUsed         *float64   `json:"seven_day_used"`
 	SevenDayResetsAt     *time.Time `json:"seven_day_resets_at"`
 	LimitsCapturedAt     *time.Time `json:"limits_captured_at"`
+	ClaudeEmail          *string    `json:"claude_email"`
+	ClaudePlan           *string    `json:"claude_plan"`
+	ClaudeTier           *string    `json:"claude_tier"`
 	LastRequestAt        *time.Time `json:"last_request_at"`
 	LastSyncedAt         *time.Time `json:"last_synced_at"`
 	AppVersion           *string    `json:"app_version"`
@@ -90,6 +93,9 @@ type ModelSummary struct {
 	OutputTokens         int64  `json:"output_tokens"`
 	SubagentRequests     int64  `json:"subagent_requests"`
 	SubagentOutputTokens int64  `json:"subagent_output_tokens"`
+	InputTokens          int64  `json:"input_tokens"`
+	CacheWriteTokens     int64  `json:"cache_write_tokens"`
+	CacheReadTokens      int64  `json:"cache_read_tokens"`
 }
 
 type ToolSummary struct {
@@ -98,6 +104,20 @@ type ToolSummary struct {
 	LinesAdded   int64  `json:"lines_added"`
 	LinesRemoved int64  `json:"lines_removed"`
 	Commits      int64  `json:"commits"`
+}
+
+type DailyUsage struct {
+	UserID           string   `json:"user_id"`
+	Day              string   `json:"day"`
+	InputTokens      int64    `json:"input_tokens"`
+	CacheWriteTokens int64    `json:"cache_write_tokens"`
+	CacheReadTokens  int64    `json:"cache_read_tokens"`
+	OutputTokens     int64    `json:"output_tokens"`
+	Requests         int64    `json:"requests"`
+	SevenDayUsed     *float64 `json:"seven_day_used"`
+	LimitUsed        *float64 `json:"limit_used"`
+	AccountWeight    int64    `json:"account_weight"`
+	AccountMembers   int32    `json:"account_members"`
 }
 
 type SessionQuery struct {

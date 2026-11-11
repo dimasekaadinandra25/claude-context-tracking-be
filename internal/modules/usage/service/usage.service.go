@@ -16,13 +16,15 @@ import (
 )
 
 const (
-	maxHours       = 20000
-	maxIDLength    = 100
-	maxModelSize   = 100
-	maxMachineSize = 255
-	maxToolName    = 100
-	maxPercent     = 100
-	maxClockSkew   = 24 * time.Hour
+	maxHours        = 20000
+	maxIDLength     = 100
+	maxModelSize    = 100
+	maxMachineSize  = 255
+	maxToolName     = 100
+	maxPercent      = 100
+	maxClockSkew    = 24 * time.Hour
+	maxAccountEmail = 320
+	maxAccountName  = 100
 )
 
 var appVersionPattern = regexp.MustCompile(`^[0-9A-Za-z.+_-]{1,32}$`)
@@ -61,7 +63,28 @@ func (s *Service) Ingest(ctx context.Context, userID string, req dto.IngestReque
 			return dto.IngestResponse{}, err
 		}
 	}
+	if account, ok := decodeAccount(req.Account); ok {
+		if err := s.repo.SaveClaudeAccount(ctx, userID, account); err != nil {
+			return dto.IngestResponse{}, err
+		}
+	}
 	return res, nil
+}
+
+func decodeAccount(raw json.RawMessage) (domain.ClaudeAccount, bool) {
+	var a domain.ClaudeAccount
+	if len(raw) == 0 || json.Unmarshal(raw, &a) != nil {
+		return a, false
+	}
+	a.Email, a.Plan, a.Tier = strings.TrimSpace(a.Email), strings.TrimSpace(a.Plan), strings.TrimSpace(a.Tier)
+	if a.Email == "" && a.Tier == "" {
+		return a, false
+	}
+	return a, accountField(a.Email, maxAccountEmail) && accountField(a.Plan, maxAccountName) && accountField(a.Tier, maxAccountName)
+}
+
+func accountField(value string, max int) bool {
+	return utf8.ValidString(value) && utf8.RuneCountInString(value) <= max && !strings.ContainsRune(value, 0)
 }
 
 func decodePlanLimits(raw json.RawMessage, now time.Time) (domain.PlanLimits, bool) {

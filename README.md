@@ -118,6 +118,8 @@ Other admin actions: list users (`GET /core/v1/admin/users`), reset a password, 
 | `make test-db` | Create, migrate and seed `claude_usage_test` |
 | `make backup` | Dump `claude_usage` into `./backups` now |
 | `make restore FILE=... RESTORE_CONFIRM=yes` | Replace `claude_usage` with a dump |
+| `make report-now` | Send the report image to `REPORT_WEBHOOKS` now |
+| `make report-test` | Run the reporter's unit tests |
 
 ## Backups
 
@@ -136,6 +138,23 @@ make restore FILE=backups/claude_usage-20261102-020000.sql.gz RESTORE_CONFIRM=ye
 ```
 
 Without `RESTORE_CONFIRM=yes` the target only prints what it would do. The dumps live on the same machine as the database; copy `./backups` somewhere else to survive a disk failure.
+
+## Daily Report
+
+The `reporter` service (Playwright on Chromium, `reporter/`) sends the dashboard's **Export image** PNG to webhooks once a day. At `REPORT_TIME` in `REPORT_TZ` it signs in to the API as `REPORT_EMAIL` / `REPORT_PASSWORD` (use a dashboard admin so every member is in the report), opens the overview inside the Docker network, clicks **Export image** and posts the file to every URL in `REPORT_WEBHOOKS`. It sends at most once per day, retries a failed day up to 3 times 10 minutes apart, never sends for a day it started after `REPORT_TIME`, and stays idle when `REPORT_WEBHOOKS` is empty. Logs show only the host of each webhook (`docker compose logs reporter`).
+
+| Webhook | How to set it | What is sent |
+|---------|---------------|--------------|
+| Discord | `https://discord.com/api/webhooks/<id>/<token>` (channel → Integrations → Webhooks) | `payload_json` with the message as `content`, the PNG as `files[0]` |
+| Telegram | `https://api.telegram.org/bot<token>/sendPhoto?chat_id=<chat id>` | `caption` and `photo` |
+| Anything else | the URL | multipart `message` and `file` |
+| WhatsApp | through a gateway such as Fonnte, as a JSON entry with `headers` and `fields` (see `.env.example`) | the gateway's fields plus `message` and `file` |
+
+A JSON entry can also set `kind` (`discord`, `telegram`, `generic`), `file_field` and `message_field`. Webhook URLs carry their own tokens, so they live only in `.env`. Try a setup without waiting for the schedule:
+
+```bash
+make report-now
+```
 
 ## Tests
 
@@ -174,6 +193,7 @@ Files live in `internal/database/migrations/core` and are named by timestamp: `Y
 | `20261102064604_drop_audit_logs` | drops the unused `core.audit_logs` |
 | `20261103022955_session_overhead` | nullable `sessions.overhead_system_tokens`, `overhead_memory_tokens`, `overhead_agents_tokens`, `overhead_skills_tokens` |
 | `20261104010000_tool_activity_plan_limits` | new tables `usage.session_tool_hours` (calls, lines and commits per session, hour and tool) and `usage.plan_limits` (latest 5-hour and 7-day usage per member) |
+| `20261111010000_plan_history_accounts` | new tables `usage.plan_limit_readings` (every plan limit reading, seeded from `usage.plan_limits`) and `usage.claude_accounts` (Claude account email, plan and tier per member) |
 
 ## API
 

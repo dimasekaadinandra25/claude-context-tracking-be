@@ -1,0 +1,11 @@
+{
+  "name": "claude-usage-reporter",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "playwright": "1.48.0"
+  }
+}

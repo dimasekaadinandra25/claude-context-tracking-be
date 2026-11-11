@@ -90,6 +90,7 @@ Every route with an `:id` returns 404 for an unknown id or one that is not a UUI
 | 3 | GET | `/usage/v1/timeseries` | JWT |
 | 4 | GET | `/usage/v1/models` | JWT |
 | 21 | GET | `/usage/v1/tools` | JWT |
+| 22 | GET | `/usage/v1/daily` | JWT |
 | 5 | GET | `/usage/v1/sessions` | JWT |
 | 6 | GET | `/usage/v1/sessions/:id` | JWT |
 | 7 | GET | `/usage/v1/people` | JWT, admin |
@@ -185,6 +186,7 @@ POST /usage/v1/sessions
 | `hours[].cache_write_tokens` | int | No | Cache write (creation) tokens, ≥ 0. Missing = 0 |
 | `hours[].cache_read_tokens` | int | No | Cache read tokens, ≥ 0. Missing = 0 |
 | `plan_limits` | object | No | The member's Claude plan usage from the status line: `five_hour` and `seven_day`, each `{ "used_percentage": 0-100, "resets_at": unix seconds }` and optional, plus `captured_at` (unix seconds). The newest `captured_at` wins per member. Invalid values are ignored and never fail the sync |
+| `account` | object | No | The Claude account signed in to Claude Code: `email` (max 320), `plan` and `tier` (max 100 each, e.g. `default_claude_max_20x`). Ignored when invalid or when both `email` and `tier` are empty |
 | `sessions[].tools` | array | No | Activity per whole UTC hour and tool: `hour`, `tool` (1-100 characters), `calls`, `lines_added`, `lines_removed`, `commits`, each number ≥ 0. Stored in `usage.session_tool_hours`. Counts only, never commands, code or file names |
 | `sessions[].overhead` | object | No | Fixed context overhead of the session: `system_tokens`, `memory_tokens`, `agents_tokens`, `skills_tokens`, each an int ≥ 0 (missing key = 0). Stored on `usage.sessions` (`overhead_*_tokens`). Sent values replace the stored ones; omitting `overhead` leaves them unchanged |
 
@@ -348,7 +350,7 @@ A member gets a single entry: themselves.
 
 ---
 
-Overview rows also carry `lines_added`, `lines_removed` and `commits` in the range (totals `total_lines_added`, `total_lines_removed`, `total_commits`), and the member's latest plan limits regardless of range: `five_hour_used`, `five_hour_resets_at`, `seven_day_used`, `seven_day_resets_at` (each `null` when never sent or once the window has reset) and `limits_captured_at`.
+Overview rows also carry `lines_added`, `lines_removed` and `commits` in the range (totals `total_lines_added`, `total_lines_removed`, `total_commits`), and the member's latest plan limits regardless of range: `five_hour_used`, `five_hour_resets_at`, `seven_day_used`, `seven_day_resets_at` (each `null` when never sent or once the window has reset) and `limits_captured_at`, plus the Claude account last sent: `claude_email`, `claude_plan`, `claude_tier` (`null` when never sent).
 
 ### 3. Timeseries
 
@@ -402,6 +404,8 @@ GET /usage/v1/models?from=...&to=...
   "message": "Models retrieved"
 }
 ```
+
+Each model row also carries `input_tokens`, `cache_write_tokens` and `cache_read_tokens` for the range.
 
 ---
 
@@ -483,6 +487,36 @@ Takes the report parameters. Returns tool activity in the range, most calls firs
 ```
 
 MCP tools are grouped as `MCP`. Members only see their own activity.
+
+---
+
+### 22. Daily
+
+```
+GET /usage/v1/daily?from=...&to=...&tz=Asia/Jakarta
+```
+
+Takes the report parameters. Returns one row per member and local day in the range with tokens or plan limit readings, ordered by member and day:
+
+```json
+[
+  {
+    "user_id": "uuid",
+    "day": "2026-11-10",
+    "input_tokens": 1200,
+    "cache_write_tokens": 90000,
+    "cache_read_tokens": 4100000,
+    "output_tokens": 52000,
+    "requests": 310,
+    "seven_day_used": 31,
+    "limit_used": 14,
+    "account_weight": 9200000,
+    "account_members": 3
+  }
+]
+```
+
+`seven_day_used` is the last 7-day reading of that day and `limit_used` the percentage points of the 7-day limit used that day, summed between readings and restarting when the window resets. Both are `null` on days without a reading. Members whose apps report the same Claude account email (case-insensitive) share one account: their readings are merged into one timeline, so `seven_day_used` and `limit_used` are the account's, every member of the account gets a row on days the account was used, `account_weight` is the account's input + cache + 5 × output that day and `account_members` how many members share it (1 for a member on their own account). Overview `five_hour_used`, `seven_day_used` and their reset times are likewise the newest reading from anyone on the account. Members only see their own rows.
 
 ---
 

@@ -68,5 +68,21 @@ services:
     depends_on: [api]
     restart: unless-stopped
 
+  reporter:
+    build: ./reporter
+    environment:
+      REPORT_WEBHOOKS: ${REPORT_WEBHOOKS:-}
+      REPORT_TIME: ${REPORT_TIME:-09:00}
+      REPORT_TZ: ${REPORT_TZ:-Asia/Jakarta}
+      REPORT_THEME: ${REPORT_THEME:-dark}
+      REPORT_LOCALE: ${REPORT_LOCALE:-en-US}
+      REPORT_MESSAGE: ${REPORT_MESSAGE:-Claude usage report {date}}
+      REPORT_EMAIL: ${REPORT_EMAIL:-}
+      REPORT_PASSWORD: ${REPORT_PASSWORD:-}
+    shm_size: 1gb
+    init: true
+    depends_on: [api, dashboard]
+    restart: unless-stopped
+
 volumes:
   pgdata:
