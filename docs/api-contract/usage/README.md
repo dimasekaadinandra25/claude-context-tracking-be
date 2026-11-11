@@ -91,6 +91,7 @@ Every route with an `:id` returns 404 for an unknown id or one that is not a UUI
 | 4 | GET | `/usage/v1/models` | JWT |
 | 21 | GET | `/usage/v1/tools` | JWT |
 | 22 | GET | `/usage/v1/daily` | JWT |
+| 23 | GET | `/usage/v1/member-models` | JWT |
 | 5 | GET | `/usage/v1/sessions` | JWT |
 | 6 | GET | `/usage/v1/sessions/:id` | JWT |
 | 7 | GET | `/usage/v1/people` | JWT, admin |
@@ -517,6 +518,35 @@ Takes the report parameters. Returns one row per member and local day in the ran
 ```
 
 `seven_day_used` is the last 7-day reading of that day and `limit_used` the percentage points of the 7-day limit used that day, summed between readings and restarting when the window resets. Both are `null` on days without a reading. Members whose apps report the same Claude account email (case-insensitive) share one account: their readings are merged into one timeline, so `seven_day_used` and `limit_used` are the account's, every member of the account gets a row on days the account was used, `account_weight` is the account's input + cache + 5 × output that day and `account_members` how many members share it (1 for a member on their own account). Overview `five_hour_used`, `seven_day_used` and their reset times are likewise the newest reading from anyone on the account. Members only see their own rows.
+
+---
+
+### 23. Member Models
+
+```
+GET /usage/v1/member-models?from=...&to=...
+```
+
+Takes the report parameters. Returns usage per member and model in the range, ordered by member name, email and model:
+
+```json
+[
+  {
+    "user_id": "uuid",
+    "full_name": "Mia",
+    "email": "mia@claude-usage.local",
+    "model": "claude-opus-5-5",
+    "requests": 2201,
+    "sessions": 14,
+    "input_tokens": 900,
+    "cache_write_tokens": 52000,
+    "cache_read_tokens": 1800000,
+    "output_tokens": 15000
+  }
+]
+```
+
+Members only see their own rows.
 
 ---
 

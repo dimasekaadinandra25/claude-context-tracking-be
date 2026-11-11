@@ -140,6 +140,14 @@ func (s *Service) Daily(ctx context.Context, c dto.Caller, q dto.ReportQuery) ([
 	return s.repo.Daily(ctx, q)
 }
 
+func (s *Service) MemberModels(ctx context.Context, c dto.Caller, q dto.ReportQuery) ([]dto.MemberModel, error) {
+	q, _, err := s.prepare(c, q)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.MemberModels(ctx, q)
+}
+
 func (s *Service) Projects(ctx context.Context, c dto.Caller, q dto.ReportQuery) ([]dto.ProjectSummary, error) {
 	q, _, err := s.prepare(c, q)
 	if err != nil {

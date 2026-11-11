@@ -212,6 +212,29 @@ func scanToolSummaries(rows pgx.Rows) ([]dto.ToolSummary, error) {
 	})
 }
 
+func (r *Repository) MemberModels(ctx context.Context, q dto.ReportQuery) ([]dto.MemberModel, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT u.id::text, COALESCE(u.full_name, ''), u.email, h.model,
+		       SUM(h.requests)::bigint, COUNT(DISTINCT h.session_id),
+		       SUM(h.input_tokens)::bigint, SUM(h.cache_write_tokens)::bigint,
+		       SUM(h.cache_read_tokens)::bigint, SUM(h.output_tokens)::bigint
+		FROM usage.session_hours h
+		JOIN core.users u ON u.id = h.user_id
+		WHERE h.hour >= $1 AND h.hour < $2 AND ($3::uuid IS NULL OR h.user_id = $3::uuid) AND u.deleted_at IS NULL
+		GROUP BY 1, 2, 3, 4
+		ORDER BY 2, 3, 4`,
+		q.From, q.To, userFilter(q.UserID))
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (dto.MemberModel, error) {
+		var m dto.MemberModel
+		err := row.Scan(&m.UserID, &m.FullName, &m.Email, &m.Model, &m.Requests, &m.Sessions,
+			&m.InputTokens, &m.CacheWriteTokens, &m.CacheReadTokens, &m.OutputTokens)
+		return m, err
+	})
+}
+
 func (r *Repository) Tools(ctx context.Context, q dto.ReportQuery) ([]dto.ToolSummary, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT tool, SUM(calls)::bigint, SUM(lines_added)::bigint, SUM(lines_removed)::bigint, SUM(commits)::bigint

@@ -235,3 +235,39 @@ func TestModelsReportInputAndCacheTokens(t *testing.T) {
 		t.Fatalf("models = %+v", models)
 	}
 }
+
+func TestMemberModelsSplitUsagePerMemberAndModelAndHideOthersFromMembers(t *testing.T) {
+	pool := testdb.Open(t)
+	ctx := context.Background()
+	a := testdb.User(t, pool, "a@test.local", false)
+	b := testdb.User(t, pool, "b@test.local", false)
+	svc := New(repository.New(pool))
+	ingest(t, svc, a, withHours("a1",
+		dto.HourPayload{Hour: at("2026-10-30T02:00:00Z"), Model: "claude-opus-5-5", Requests: 3, CacheReadTokens: 900, OutputTokens: 10},
+		dto.HourPayload{Hour: at("2026-10-30T03:00:00Z"), Model: "claude-haiku-5-5", Requests: 1, InputTokens: 50},
+	))
+	ingest(t, svc, b, withHours("b1",
+		dto.HourPayload{Hour: at("2026-10-30T04:00:00Z"), Model: "claude-opus-5-5", Requests: 2, CacheWriteTokens: 70},
+	))
+
+	all, err := svc.MemberModels(ctx, dto.Caller{IsAdmin: true}, week())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]dto.MemberModel{}
+	for _, m := range all {
+		got[m.Email+" "+m.Model] = m
+	}
+	if len(all) != 3 || got["a@test.local claude-opus-5-5"].Requests != 3 || got["a@test.local claude-opus-5-5"].CacheReadTokens != 900 ||
+		got["a@test.local claude-haiku-5-5"].InputTokens != 50 || got["b@test.local claude-opus-5-5"].CacheWriteTokens != 70 {
+		t.Fatalf("member models = %+v", all)
+	}
+
+	own, err := svc.MemberModels(ctx, dto.Caller{UserID: b}, dto.ReportQuery{From: week().From, To: week().To, TZ: "UTC", UserID: a})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(own) != 1 || own[0].UserID != b {
+		t.Fatalf("member saw others: %+v", own)
+	}
+}

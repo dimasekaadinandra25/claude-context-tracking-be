@@ -98,6 +98,19 @@ type ModelSummary struct {
 	CacheReadTokens      int64  `json:"cache_read_tokens"`
 }
 
+type MemberModel struct {
+	UserID           string `json:"user_id"`
+	FullName         string `json:"full_name"`
+	Email            string `json:"email"`
+	Model            string `json:"model"`
+	Requests         int64  `json:"requests"`
+	Sessions         int64  `json:"sessions"`
+	InputTokens      int64  `json:"input_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
+}
+
 type ToolSummary struct {
 	Tool         string `json:"tool"`
 	Calls        int64  `json:"calls"`
