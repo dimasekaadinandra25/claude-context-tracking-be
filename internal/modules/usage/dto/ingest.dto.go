@@ -60,6 +60,7 @@ type IngestResponse struct {
 	Accepted         int         `json:"accepted"`
 	Rejected         []Rejection `json:"rejected"`
 	LatestAppVersion string      `json:"latest_app_version,omitempty"`
+	CostPerMillion   float64     `json:"cost_per_million_tokens,omitempty"`
 }
 
 type Rejection struct {

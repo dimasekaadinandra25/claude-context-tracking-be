@@ -132,6 +132,48 @@ func (s *Service) RecordAppVersion(ctx context.Context, keyID, version string) e
 	return s.repo.SetAppVersion(ctx, keyID, version)
 }
 
+const (
+	monthsPerYear  = 12
+	weeksPerYear   = 52
+	million        = 1_000_000
+	percentOfWhole = 100
+)
+
+var planPrices = []struct {
+	tier  string
+	price float64
+}{
+	{"max_20x", 200},
+	{"max_5x", 100},
+	{"pro", 20},
+}
+
+func planPrice(tier string) (float64, bool) {
+	for _, p := range planPrices {
+		if strings.Contains(tier, p.tier) {
+			return p.price, true
+		}
+	}
+	return 0, false
+}
+
+func costPerMillion(used float64, tier string, weight int64) float64 {
+	price, ok := planPrice(tier)
+	if !ok || weight <= 0 || used <= 0 {
+		return 0
+	}
+	weekly := price * monthsPerYear / weeksPerYear
+	return used / percentOfWhole * weekly / float64(weight) * million
+}
+
+func (s *Service) CostPerMillion(ctx context.Context, userID string) (float64, error) {
+	used, tier, weight, ok, err := s.repo.AccountWeek(ctx, userID)
+	if err != nil || !ok {
+		return 0, err
+	}
+	return costPerMillion(used, tier, weight), nil
+}
+
 func (s *Service) LatestAppVersion(ctx context.Context) (string, error) {
 	versions, err := s.repo.AppVersions(ctx)
 	if err != nil {

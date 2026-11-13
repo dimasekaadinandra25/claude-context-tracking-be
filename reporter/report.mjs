@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
-import { accountsFrom, check, dailySummary, rulesFrom, staleMembers, summarySent } from './alerts.mjs';
+import { accountsFrom, check, dailySummary, lastWeekUsed, rulesFrom, staleMembers, summarySent } from './alerts.mjs';
 import { dueDay, hooksFrom, localNow, redact, requestFor, textRequestFor } from './hooks.mjs';
 
 const env = (name, fallback) => process.env[name]?.trim() || fallback;
@@ -15,6 +15,7 @@ const TIME_ZONE = env('REPORT_TZ', 'Asia/Jakarta');
 const THEME = env('REPORT_THEME', 'dark');
 const LOCALE = env('REPORT_LOCALE', 'en-US');
 const LANGUAGE = env('REPORT_LANG', 'en');
+const LINK = env('REPORT_LINK', '');
 const MESSAGE = env('REPORT_MESSAGE', 'Claude usage report {date}');
 const STATE_FILE = env('REPORT_STATE_FILE', '/state/reporter.json');
 const ALERTS = process.env.REPORT_ALERTS ?? '80,90,pace,summary,stale';
@@ -127,9 +128,9 @@ async function report(hooks, day, title = MESSAGE.replace('{date}', day)) {
 
 const notify = (hooks, text) => send(hooks, (hook) => textRequestFor(hook, text));
 
-async function lastDay(paths) {
+async function lastDay(paths, daysAgo = 0) {
   const session = await signIn();
-  const to = new Date();
+  const to = new Date(Date.now() - daysAgo * DAY_MS);
   const params = new URLSearchParams({
     from: new Date(to.getTime() - DAY_MS).toISOString(),
     to: to.toISOString(),
@@ -154,7 +155,12 @@ async function people() {
 async function summary() {
   try {
     const [overview, projects] = await lastDay(['/usage/v1/overview', '/usage/v1/projects']);
-    return dailySummary(overview.people, projects, Date.now());
+    const weekAgo = new Date(Date.now() - 7 * DAY_MS);
+    const day = localNow(weekAgo, TIME_ZONE).day;
+    const label = weekAgo.toLocaleDateString('en-GB', { timeZone: TIME_ZONE, weekday: 'short', day: 'numeric' });
+    const [before] = await lastDay(['/usage/v1/daily'], 6);
+    const link = LINK ? `${LINK.replace(/\/$/, '')}/dashboard/overview` : '';
+    return dailySummary(overview.people, projects, Date.now(), lastWeekUsed(overview.people, before, day, label), link);
   } catch (error) {
     log(`numbers left out of the message: ${error.message}`);
     return '';

@@ -63,3 +63,35 @@ func TestWeeksSummariseEachWindowPerMemberWithTheTopModel(t *testing.T) {
 		t.Fatalf("member sees = %+v", own)
 	}
 }
+
+func TestCostPerMillionUsesTheWholeAccountsCurrentWeek(t *testing.T) {
+	pool := testdb.Open(t)
+	ctx := context.Background()
+	owner := testdb.User(t, pool, "owner@test.local", false)
+	guest := testdb.User(t, pool, "guest@test.local", false)
+	loner := testdb.User(t, pool, "loner@test.local", false)
+	svc := New(repository.New(pool))
+	now := time.Now().UTC().Truncate(time.Hour)
+	account := json.RawMessage(`{"email":"team@claude.test","tier":"default_claude_max_20x"}`)
+	for _, u := range []struct {
+		id    string
+		reads int64
+	}{{owner, 7_000_000}, {guest, 5_000_000}} {
+		if _, err := svc.Ingest(ctx, u.id, dto.IngestRequest{Machine: "PC", Account: account, Sessions: encode(withHours(u.id[:8],
+			dto.HourPayload{Hour: now.Add(-2 * time.Hour), Model: "m", Requests: 1, CacheReadTokens: u.reads}))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := svc.Ingest(ctx, owner, dto.IngestRequest{Machine: "PC", PlanLimits: weekly(t, 26, now.Add(72*time.Hour), now)}); err != nil {
+		t.Fatal(err)
+	}
+	for _, who := range []string{owner, guest} {
+		rate, err := svc.CostPerMillion(ctx, who)
+		if err != nil || rate < 0.99 || rate > 1.01 {
+			t.Fatalf("rate for %s = %v %v, want 1.00", who, rate, err)
+		}
+	}
+	if rate, err := svc.CostPerMillion(ctx, loner); err != nil || rate != 0 {
+		t.Fatalf("no reading must give no rate, got %v %v", rate, err)
+	}
+}

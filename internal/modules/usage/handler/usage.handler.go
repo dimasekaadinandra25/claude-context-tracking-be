@@ -47,6 +47,9 @@ func (h *Handler) Ingest(c *gin.Context) {
 	if err == nil && version != "" {
 		res.LatestAppVersion, err = h.service.LatestAppVersion(c.Request.Context())
 	}
+	if err == nil && version != "" {
+		res.CostPerMillion, err = h.service.CostPerMillion(c.Request.Context(), middleware.MustGetUserID(c))
+	}
 	if err != nil {
 		logger.Error("Failed to save usage", logger.Err(err))
 		response.Error(c, http.StatusInternalServerError, "Internal server error", "")

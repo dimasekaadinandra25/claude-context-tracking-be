@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { accountsFrom, check, dailySummary, rulesFrom, staleMembers, summarySent } from './alerts.mjs';
+import { accountsFrom, check, dailySummary, lastWeekUsed, rulesFrom, staleMembers, summarySent } from './alerts.mjs';
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -123,4 +123,19 @@ test('daily message lists the weekly budget, model limits and top projects', () 
   );
   const fast = dailySummary([person({ seven_day_used: 80 })], [], now);
   assert.match(fast, /^Weekly limit 80% used · budget 6\.7%\/day for 3\.0 days · at this pace it runs out in 1d 0h$/);
+});
+
+test('daily message compares with the same day last week and links the dashboard', () => {
+  const people = [person({ user_id: 'u1', claude_email: 'Team@x.test' })];
+  const daily = [
+    { user_id: 'u1', day: '2026-11-06', seven_day_used: 45 },
+    { user_id: 'u1', day: '2026-11-05', seven_day_used: 30 },
+  ];
+  const lastWeek = lastWeekUsed(people, daily, '2026-11-06', 'Fri 6');
+  assert.deepEqual([...lastWeek.entries()], [['team@x.test', { label: 'Fri 6', used: 45 }]]);
+  const text = dailySummary(people, [], now, lastWeek, 'https://usage.example.com/dashboard/overview');
+  assert.equal(
+    text,
+    'Weekly limit 50% used · budget 16.7%/day for 3.0 days · on pace for 88% at reset · last week by Fri 6: 45%\nhttps://usage.example.com/dashboard/overview'
+  );
 });

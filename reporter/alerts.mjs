@@ -100,6 +100,18 @@ export function summarySent(state) {
   return { ...state, sent: [...state.sent, SUMMARY] };
 }
 
+export function lastWeekUsed(people, daily, day, label) {
+  const accountOf = new Map(
+    people.map((person) => [person.user_id, (person.claude_email || person.user_id).toLowerCase()])
+  );
+  const used = new Map();
+  for (const row of daily) {
+    const key = accountOf.get(row.user_id);
+    if (row.day === day && row.seven_day_used != null && key) used.set(key, { label, used: row.seven_day_used });
+  }
+  return used;
+}
+
 export function staleMembers(people, now, previous = {}) {
   const state = {};
   const alerts = [];
@@ -121,7 +133,7 @@ export function staleMembers(people, now, previous = {}) {
 const OUTPUT_WEIGHT = 5;
 const TOP_PROJECTS = 3;
 
-function weeklyLine(account, now) {
+function weeklyLine(account, now, lastWeek) {
   const left = account.resetsAt - now;
   const used = Math.round(account.used);
   const parts = [`Weekly limit ${used}% used`];
@@ -139,6 +151,7 @@ function weeklyLine(account, now) {
       );
     }
   }
+  if (lastWeek) parts.push(`last week by ${lastWeek.label}: ${Math.round(lastWeek.used)}%`);
   return parts.join(' · ');
 }
 
@@ -165,16 +178,17 @@ function topProjectsLine(projects) {
   return `Top projects, last 24h: ${parts.join(' · ')}`;
 }
 
-export function dailySummary(people, projects, now) {
+export function dailySummary(people, projects, now, lastWeek = new Map(), link = '') {
   const accounts = accountsFrom(people);
   const several = accounts.filter((account) => account.weekly).length > 1;
   const lines = accounts.map((account) => {
     const line = account.weekly
-      ? weeklyLine(account, now)
+      ? weeklyLine(account, now, lastWeek.get(account.key))
       : `${account.label.replace(/^Claude /, '')} ${Math.round(account.used)}% used`;
     return several ? `${line} (${account.members.join(', ')})` : line;
   });
   const top = topProjectsLine(projects);
   if (top) lines.push(top);
+  if (link) lines.push(link);
   return lines.join('\n');
 }

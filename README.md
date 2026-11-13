@@ -176,7 +176,7 @@ docker compose --profile public up -d --build
 
 4. Open `https://usage.example.com`, issue each member an API key, and set the server URL in each app's **Settings** to `https://usage.example.com`.
 
-Caddy sends `/core/*`, `/usage/*` and `/health` to the API and everything else to the dashboard, so the browser never needs CORS. Postgres, the API and the dashboard stay bound to `127.0.0.1`; only Caddy listens publicly. Certificates are kept in the `caddy-data` volume and renewed automatically.
+Once `PUBLIC_URL` is set, the daily Discord message also links to the dashboard. Caddy sends `/core/*`, `/usage/*` and `/health` to the API and everything else to the dashboard, so the browser never needs CORS. Postgres, the API and the dashboard stay bound to `127.0.0.1`; only Caddy listens publicly. Certificates are kept in the `caddy-data` volume and renewed automatically.
 
 ## Tests
 

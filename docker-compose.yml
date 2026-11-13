@@ -81,6 +81,7 @@ services:
       REPORT_LOCALE: ${REPORT_LOCALE:-en-US}
       REPORT_LANG: ${REPORT_LANG:-en}
       REPORT_PUBLIC_API_URL: ${PUBLIC_URL:-http://localhost:8080}
+      REPORT_LINK: ${PUBLIC_URL:-}
       REPORT_MESSAGE: ${REPORT_MESSAGE:-Claude usage report {date}}
       REPORT_EMAIL: ${REPORT_EMAIL:-}
       REPORT_PASSWORD: ${REPORT_PASSWORD:-}

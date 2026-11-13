@@ -203,6 +203,7 @@ The body may be at most 64 MB.
 - `api_keys.last_used_at` is updated on every call. Reports show it as `last_synced_at`.
 - `api_keys.app_version` is set from a valid `X-App-Version` header after the batch is saved. A call without the header leaves it unchanged. Reports show it as `app_version`.
 - When the call sends `X-App-Version`, `latest_app_version` is the newest version any active API key has reported, compared number by number (`0.10.0` is newer than `0.9.1`). The app shows an update notice when it is newer than its own.
+- When the call sends `X-App-Version`, `cost_per_million_tokens` is this week's plan cost per million weighted tokens (input including cache + 5 × output including subagents) for the caller's Claude account: the latest 7-day `used` % × the weekly allowance of the account's tier ($200, $100 or $20 per month × 12 / 52) divided by every member's weighted tokens since the window started. It is left out when the account has no live reading, an unknown tier or no tokens.
 
 **Response (200):**
 ```json
@@ -210,7 +211,8 @@ The body may be at most 64 MB.
   "data": {
     "accepted": 1,
     "rejected": [],
-    "latest_app_version": "0.2.0"
+    "latest_app_version": "0.3.0",
+    "cost_per_million_tokens": 0.031
   },
   "message": "Usage saved"
 }

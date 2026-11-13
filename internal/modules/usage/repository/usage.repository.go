@@ -191,6 +191,32 @@ func (r *Repository) SaveSession(ctx context.Context, s domain.Session, overhead
 	return true, tx.Commit(ctx)
 }
 
+func (r *Repository) AccountWeek(ctx context.Context, userID string) (used float64, tier string, weight int64, ok bool, err error) {
+	err = r.db.QueryRow(ctx, `
+		WITH me AS (
+			SELECT COALESCE(NULLIF(LOWER(ca.email), ''), u.id::text) AS account
+			FROM core.users u LEFT JOIN usage.claude_accounts ca ON ca.user_id = u.id
+			WHERE u.id = $1
+		), members AS (
+			SELECT u.id FROM core.users u LEFT JOIN usage.claude_accounts ca ON ca.user_id = u.id
+			WHERE u.deleted_at IS NULL AND COALESCE(NULLIF(LOWER(ca.email), ''), u.id::text) = (SELECT account FROM me)
+		), latest AS (
+			SELECT p.seven_day_used, p.seven_day_resets_at FROM usage.plan_limits p
+			WHERE p.user_id IN (SELECT id FROM members) AND p.seven_day_resets_at > NOW() AND p.seven_day_used IS NOT NULL
+			ORDER BY p.captured_at DESC LIMIT 1
+		)
+		SELECT l.seven_day_used,
+		       COALESCE((SELECT MAX(NULLIF(ca.tier, '')) FROM usage.claude_accounts ca WHERE ca.user_id IN (SELECT id FROM members)), ''),
+		       COALESCE((SELECT SUM(h.input_tokens + h.cache_write_tokens + h.cache_read_tokens + 5 * (h.output_tokens + h.subagent_output_tokens))
+		                 FROM usage.session_hours h
+		                 WHERE h.user_id IN (SELECT id FROM members) AND h.hour >= l.seven_day_resets_at - INTERVAL '7 days'), 0)::bigint
+		FROM latest l`, userID).Scan(&used, &tier, &weight)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, "", 0, false, nil
+	}
+	return used, tier, weight, err == nil, err
+}
+
 func (r *Repository) AppVersions(ctx context.Context) ([]string, error) {
 	rows, err := r.db.Query(ctx, `SELECT DISTINCT app_version FROM core.api_keys WHERE app_version IS NOT NULL AND deleted_at IS NULL`)
 	if err != nil {
