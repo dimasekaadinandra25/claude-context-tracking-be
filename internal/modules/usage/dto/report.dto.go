@@ -105,6 +105,21 @@ type ModelLimit struct {
 	ResetsAt time.Time `json:"resets_at"`
 }
 
+type WeekUsage struct {
+	Account      string    `json:"account"`
+	ClaudeEmail  *string   `json:"claude_email"`
+	ClaudeTier   *string   `json:"claude_tier"`
+	ResetsAt     time.Time `json:"resets_at"`
+	Used         float64   `json:"used"`
+	TopModel     *string   `json:"top_model"`
+	UserID       *string   `json:"user_id"`
+	FullName     string    `json:"full_name"`
+	InputTokens  int64     `json:"input_tokens"`
+	OutputTokens int64     `json:"output_tokens"`
+	Requests     int64     `json:"requests"`
+	Weight       int64     `json:"weight"`
+}
+
 type MemberModel struct {
 	UserID           string `json:"user_id"`
 	FullName         string `json:"full_name"`

@@ -160,6 +160,24 @@ make report-now
 
 Every 5 minutes the reporter also reads each Claude account's weekly limit, and every single-model weekly limit Claude reports (such as Fable), and posts a text to the same webhooks when one passes a percentage in `REPORT_ALERTS` (default `80,90,pace,summary,stale`). `pace` warns once when the account is on pace to run out before the reset (at least a day into the week, below the first percentage). `summary` posts the report image once during the last hour before the weekly reset, as a record of the finished week; a failed send is retried on the next check. `stale` warns once when an active member's app has not synced for 24 hours (for example the PC is off or the app was closed), and again only after it has synced and stopped again. Each limit alert is sent once per weekly window. Leave `REPORT_ALERTS` empty to turn alerts off. Check now with `docker compose run --rm reporter node report.mjs --alerts`.
 
+## Going Online
+
+Teammates' apps can only send usage once the server is reachable from their PCs. The optional `caddy` service (profile `public`) serves the dashboard and the API on one HTTPS domain and gets a free Let's Encrypt certificate by itself.
+
+1. Get a small Linux server (any VPS with Docker, 1 GB RAM is enough) and a domain or subdomain. Point an `A` record such as `usage.example.com` at the server's IP and open ports 80 and 443.
+2. Copy this repo and the dashboard repo side by side on the server, create `.env` from `.env.example`, and set:
+   - `PUBLIC_DOMAIN=usage.example.com` and `PUBLIC_URL=https://usage.example.com`
+   - new, strong values for `DB_PASSWORD` (used when the database is first created), `JWT_SECRET` and `SEED_ADMIN_PASSWORD`, then sign in and change the admin password
+3. Start everything, including Caddy, and rebuild the dashboard so it calls the public URL:
+
+```bash
+docker compose --profile public up -d --build
+```
+
+4. Open `https://usage.example.com`, issue each member an API key, and set the server URL in each app's **Settings** to `https://usage.example.com`.
+
+Caddy sends `/core/*`, `/usage/*` and `/health` to the API and everything else to the dashboard, so the browser never needs CORS. Postgres, the API and the dashboard stay bound to `127.0.0.1`; only Caddy listens publicly. Certificates are kept in the `caddy-data` volume and renewed automatically.
+
 ## Tests
 
 Unit tests run without a database:

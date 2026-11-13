@@ -328,6 +328,67 @@ func (r *Repository) Daily(ctx context.Context, q dto.ReportQuery) ([]dto.DailyU
 	})
 }
 
+func (r *Repository) Weeks(ctx context.Context, q dto.ReportQuery) ([]dto.WeekUsage, error) {
+	rows, err := r.db.Query(ctx, `
+		WITH accounts AS (
+			SELECT u.id AS user_id, COALESCE(u.full_name, '') AS full_name,
+			       COALESCE(NULLIF(LOWER(ca.email), ''), u.id::text) AS account, NULLIF(ca.tier, '') AS tier
+			FROM core.users u
+			LEFT JOIN usage.claude_accounts ca ON ca.user_id = u.id
+			WHERE u.deleted_at IS NULL
+		), scope AS (
+			SELECT DISTINCT account FROM accounts WHERE $3::uuid IS NULL OR user_id = $3::uuid
+		), windows AS (
+			SELECT a.account, date_trunc('hour', r.seven_day_resets_at + INTERVAL '30 minutes') AS resets_at,
+			       (ARRAY_AGG(r.seven_day_used ORDER BY r.captured_at DESC))[1] AS used
+			FROM usage.plan_limit_readings r
+			JOIN accounts a ON a.user_id = r.user_id
+			WHERE r.seven_day_used IS NOT NULL AND r.seven_day_resets_at IS NOT NULL
+			  AND a.account IN (SELECT account FROM scope)
+			  AND r.seven_day_resets_at > $1 AND r.seven_day_resets_at - INTERVAL '7 days' < $2
+			GROUP BY 1, 2
+		), hours AS (
+			SELECT w.account, w.resets_at, h.user_id, h.model,
+			       h.input_tokens + h.cache_write_tokens + h.cache_read_tokens AS input_tokens,
+			       h.output_tokens + h.subagent_output_tokens AS output_tokens,
+			       h.requests + h.subagent_requests AS requests
+			FROM windows w
+			JOIN accounts a ON a.account = w.account
+			JOIN usage.session_hours h ON h.user_id = a.user_id
+			 AND h.hour >= w.resets_at - INTERVAL '7 days' AND h.hour < w.resets_at
+		), members AS (
+			SELECT account, resets_at, user_id,
+			       SUM(input_tokens)::bigint AS input_tokens, SUM(output_tokens)::bigint AS output_tokens,
+			       SUM(requests)::bigint AS requests, SUM(input_tokens + 5 * output_tokens)::bigint AS weight
+			FROM hours GROUP BY 1, 2, 3
+		), top_models AS (
+			SELECT DISTINCT ON (account, resets_at) account, resets_at, model
+			FROM hours
+			GROUP BY 1, 2, 3
+			ORDER BY account, resets_at, SUM(input_tokens + 5 * output_tokens) DESC
+		)
+		SELECT w.account, CASE WHEN w.account LIKE '%@%' THEN w.account END,
+		       (SELECT MAX(tier) FROM accounts a WHERE a.account = w.account),
+		       w.resets_at, w.used, tm.model, m.user_id::text, COALESCE(a.full_name, ''),
+		       COALESCE(m.input_tokens, 0), COALESCE(m.output_tokens, 0), COALESCE(m.requests, 0), COALESCE(m.weight, 0)
+		FROM windows w
+		LEFT JOIN top_models tm ON tm.account = w.account AND tm.resets_at = w.resets_at
+		LEFT JOIN members m ON m.account = w.account AND m.resets_at = w.resets_at
+		     AND ($3::uuid IS NULL OR m.user_id = $3::uuid)
+		LEFT JOIN accounts a ON a.user_id = m.user_id
+		ORDER BY w.resets_at DESC, w.account, m.weight DESC NULLS LAST`,
+		q.From, q.To, userFilter(q.UserID))
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (dto.WeekUsage, error) {
+		var w dto.WeekUsage
+		err := row.Scan(&w.Account, &w.ClaudeEmail, &w.ClaudeTier, &w.ResetsAt, &w.Used, &w.TopModel, &w.UserID,
+			&w.FullName, &w.InputTokens, &w.OutputTokens, &w.Requests, &w.Weight)
+		return w, err
+	})
+}
+
 func (r *Repository) Sessions(ctx context.Context, q dto.SessionQuery, limit, offset int) ([]dto.SessionRow, int64, error) {
 	where := `
 		FROM usage.sessions s

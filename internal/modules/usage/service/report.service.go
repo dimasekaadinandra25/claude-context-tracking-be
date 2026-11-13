@@ -140,6 +140,14 @@ func (s *Service) Daily(ctx context.Context, c dto.Caller, q dto.ReportQuery) ([
 	return s.repo.Daily(ctx, q)
 }
 
+func (s *Service) Weeks(ctx context.Context, c dto.Caller, q dto.ReportQuery) ([]dto.WeekUsage, error) {
+	q, _, err := s.prepare(c, q)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.Weeks(ctx, q)
+}
+
 func (s *Service) MemberModels(ctx context.Context, c dto.Caller, q dto.ReportQuery) ([]dto.MemberModel, error) {
 	q, _, err := s.prepare(c, q)
 	if err != nil {

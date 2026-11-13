@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { accountsFrom, check, rulesFrom, staleMembers, summarySent } from './alerts.mjs';
+import { accountsFrom, check, dailySummary, rulesFrom, staleMembers, summarySent } from './alerts.mjs';
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -98,4 +98,29 @@ test('a member whose app stopped syncing for 24h is reported once until it syncs
   assert.deepEqual(back.state, {});
   people[0].last_synced_at = at(26);
   assert.equal(staleMembers(people, now, back.state).alerts.length, 1);
+});
+
+test('daily message lists the weekly budget, model limits and top projects', () => {
+  const project = (name, input, output) => ({
+    project: name,
+    input_tokens: input,
+    cache_write_tokens: 0,
+    cache_read_tokens: 0,
+    output_tokens: output,
+  });
+  const text = dailySummary(
+    [person({ model_limits: [{ name: 'Fable', used: 10, resets_at: new Date(now + 3 * DAY).toISOString() }] })],
+    [project('api', 600, 0), project('web', 100, 20), project('a', 50, 0), project('b', 50, 0), project('', 0, 0)],
+    now
+  );
+  assert.equal(
+    text,
+    [
+      'Weekly limit 50% used · budget 16.7%/day for 3.0 days · on pace for 88% at reset',
+      'Fable weekly limit 10% used',
+      'Top projects, last 24h: api 67% · web 22% · a 6% · others 6%',
+    ].join('\n')
+  );
+  const fast = dailySummary([person({ seven_day_used: 80 })], [], now);
+  assert.match(fast, /^Weekly limit 80% used · budget 6\.7%\/day for 3\.0 days · at this pace it runs out in 1d 0h$/);
 });

@@ -1,0 +1,6 @@
+{$PUBLIC_DOMAIN} {
+	encode gzip
+	@api path /core/* /usage/* /health
+	reverse_proxy @api api:8080
+	reverse_proxy dashboard:80
+}

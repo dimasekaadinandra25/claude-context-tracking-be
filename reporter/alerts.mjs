@@ -117,3 +117,64 @@ export function staleMembers(people, now, previous = {}) {
   }
   return { state, alerts };
 }
+
+const OUTPUT_WEIGHT = 5;
+const TOP_PROJECTS = 3;
+
+function weeklyLine(account, now) {
+  const left = account.resetsAt - now;
+  const used = Math.round(account.used);
+  const parts = [`Weekly limit ${used}% used`];
+  if (left > 0) {
+    const days = left / DAY_MS;
+    const perDay = Math.max(0, FULL - account.used) / Math.max(days, 1);
+    parts.push(`budget ${perDay.toFixed(1)}%/day for ${days.toFixed(1)} days`);
+    const elapsed = WEEK_MS - left;
+    if (elapsed >= DAY_MS && account.used > 0) {
+      const projected = (account.used / elapsed) * WEEK_MS;
+      parts.push(
+        projected > FULL && account.used < FULL
+          ? `at this pace it runs out in ${resetsIn(((FULL - account.used) / account.used) * elapsed)}`
+          : `on pace for ${Math.round(projected)}% at reset`
+      );
+    }
+  }
+  return parts.join(' · ');
+}
+
+function projectWeight(project) {
+  return (
+    project.input_tokens +
+    project.cache_write_tokens +
+    project.cache_read_tokens +
+    OUTPUT_WEIGHT * project.output_tokens
+  );
+}
+
+function topProjectsLine(projects) {
+  const weighed = projects
+    .map((project) => ({ name: project.project || 'Private', weight: projectWeight(project) }))
+    .filter((project) => project.weight > 0)
+    .sort((a, b) => b.weight - a.weight);
+  const total = weighed.reduce((sum, project) => sum + project.weight, 0);
+  if (total === 0) return null;
+  const share = (weight) => `${Math.round((weight / total) * FULL)}%`;
+  const parts = weighed.slice(0, TOP_PROJECTS).map((project) => `${project.name} ${share(project.weight)}`);
+  const rest = weighed.slice(TOP_PROJECTS).reduce((sum, project) => sum + project.weight, 0);
+  if (rest > 0) parts.push(`others ${share(rest)}`);
+  return `Top projects, last 24h: ${parts.join(' · ')}`;
+}
+
+export function dailySummary(people, projects, now) {
+  const accounts = accountsFrom(people);
+  const several = accounts.filter((account) => account.weekly).length > 1;
+  const lines = accounts.map((account) => {
+    const line = account.weekly
+      ? weeklyLine(account, now)
+      : `${account.label.replace(/^Claude /, '')} ${Math.round(account.used)}% used`;
+    return several ? `${line} (${account.members.join(', ')})` : line;
+  });
+  const top = topProjectsLine(projects);
+  if (top) lines.push(top);
+  return lines.join('\n');
+}

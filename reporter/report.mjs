@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
-import { accountsFrom, check, rulesFrom, staleMembers, summarySent } from './alerts.mjs';
+import { accountsFrom, check, dailySummary, rulesFrom, staleMembers, summarySent } from './alerts.mjs';
 import { dueDay, hooksFrom, localNow, redact, requestFor, textRequestFor } from './hooks.mjs';
 
 const env = (name, fallback) => process.env[name]?.trim() || fallback;
@@ -117,7 +117,8 @@ async function send(hooks, build) {
   return failed;
 }
 
-async function report(hooks, day, message = MESSAGE.replace('{date}', day)) {
+async function report(hooks, day, title = MESSAGE.replace('{date}', day)) {
+  const message = [title, await summary()].filter(Boolean).join('\n');
   const { png, fileName } = await capture();
   log(`captured ${fileName} (${png.length} bytes)`);
   const failed = await send(hooks, (hook) => requestFor(hook, png, fileName, message));
@@ -126,7 +127,7 @@ async function report(hooks, day, message = MESSAGE.replace('{date}', day)) {
 
 const notify = (hooks, text) => send(hooks, (hook) => textRequestFor(hook, text));
 
-async function people() {
+async function lastDay(paths) {
   const session = await signIn();
   const to = new Date();
   const params = new URLSearchParams({
@@ -134,11 +135,30 @@ async function people() {
     to: to.toISOString(),
     tz: TIME_ZONE,
   });
-  const res = await fetch(`${API_URL}/usage/v1/overview?${params}`, {
-    headers: { Authorization: `Bearer ${session.access_token}` },
-  });
-  if (!res.ok) throw new Error(`overview failed with ${res.status}`);
-  return (await res.json()).data.people;
+  return Promise.all(
+    paths.map(async (path) => {
+      const res = await fetch(`${API_URL}${path}?${params}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (!res.ok) throw new Error(`${path} failed with ${res.status}`);
+      return (await res.json()).data;
+    })
+  );
+}
+
+async function people() {
+  const [overview] = await lastDay(['/usage/v1/overview']);
+  return overview.people;
+}
+
+async function summary() {
+  try {
+    const [overview, projects] = await lastDay(['/usage/v1/overview', '/usage/v1/projects']);
+    return dailySummary(overview.people, projects, Date.now());
+  } catch (error) {
+    log(`numbers left out of the message: ${error.message}`);
+    return '';
+  }
 }
 
 async function checkAlerts(hooks, rules, state) {

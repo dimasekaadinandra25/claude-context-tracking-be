@@ -523,6 +523,35 @@ Takes the report parameters. Returns one row per member and local day in the ran
 
 ---
 
+### 24. Weeks
+
+```
+GET /usage/v1/weeks?from=...&to=...
+```
+
+Takes the report parameters. Returns one row per member and Claude 7-day limit window that ends after `from` and starts before `to`, newest first. A window is identified by its reset time (readings whose resets differ by less than 30 minutes are one window) and `used` is the last 7-day reading in it. Tokens and requests are each member's usage inside the 7 days before `resets_at`, including subagents, and `weight` is input + 5 × output. `top_model` is the window's model with the most weight. A window nobody used still has one row with `user_id` `null`. Members see their account's windows but only their own row:
+
+```json
+[
+  {
+    "account": "team@claude.test",
+    "claude_email": "team@claude.test",
+    "claude_tier": "default_claude_max_20x",
+    "resets_at": "2026-11-18T15:00:00Z",
+    "used": 22,
+    "top_model": "claude-opus-5-5",
+    "user_id": "uuid",
+    "full_name": "Mia",
+    "input_tokens": 348100000,
+    "output_tokens": 1100000,
+    "requests": 1039,
+    "weight": 353600000
+  }
+]
+```
+
+---
+
 ### 23. Member Models
 
 ```
