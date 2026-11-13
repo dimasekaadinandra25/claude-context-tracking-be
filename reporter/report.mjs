@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
-import { accountsFrom, check, rulesFrom } from './alerts.mjs';
+import { accountsFrom, check, rulesFrom, summarySent } from './alerts.mjs';
 import { dueDay, hooksFrom, localNow, redact, requestFor, textRequestFor } from './hooks.mjs';
 
 const env = (name, fallback) => process.env[name]?.trim() || fallback;
@@ -17,7 +17,7 @@ const LOCALE = env('REPORT_LOCALE', 'en-US');
 const LANGUAGE = env('REPORT_LANG', 'en');
 const MESSAGE = env('REPORT_MESSAGE', 'Claude usage report {date}');
 const STATE_FILE = env('REPORT_STATE_FILE', '/state/reporter.json');
-const ALERTS = process.env.REPORT_ALERTS ?? '80,90,pace';
+const ALERTS = process.env.REPORT_ALERTS ?? '80,90,pace,summary';
 const CHECK_MS = 30_000;
 const ALERT_CHECK_MS = 5 * 60_000;
 const DAY_MS = 86_400_000;
@@ -117,10 +117,9 @@ async function send(hooks, build) {
   return failed;
 }
 
-async function report(hooks, day) {
+async function report(hooks, day, message = MESSAGE.replace('{date}', day)) {
   const { png, fileName } = await capture();
   log(`captured ${fileName} (${png.length} bytes)`);
-  const message = MESSAGE.replace('{date}', day);
   const failed = await send(hooks, (hook) => requestFor(hook, png, fileName, message));
   if (failed === hooks.length) throw new Error('no webhook accepted the report');
 }
@@ -146,11 +145,21 @@ async function checkAlerts(hooks, rules, state) {
   const now = Date.now();
   const alerts = { ...state.alerts };
   for (const account of accountsFrom(await people())) {
-    const { state: next, text } = check(account, now, rules, alerts[account.key]);
+    const { state: next, text, summary } = check(account, now, rules, alerts[account.key]);
     alerts[account.key] = next;
     if (text) {
       log(`alert: ${text}`);
       await notify(hooks, text);
+    }
+    if (summary) {
+      const ends = localNow(new Date(account.resetsAt), TIME_ZONE);
+      const message = `Claude weekly summary: the 7-day window ends ${ends.day} ${ends.time} (${account.members.join(', ')})`;
+      try {
+        await report(hooks, ends.day, message);
+        alerts[account.key] = summarySent(next);
+      } catch (error) {
+        log(`weekly summary failed, retrying on the next check: ${error.message}`);
+      }
     }
   }
   state.alerts = alerts;

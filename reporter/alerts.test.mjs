@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { accountsFrom, check, rulesFrom } from './alerts.mjs';
+import { accountsFrom, check, rulesFrom, summarySent } from './alerts.mjs';
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const now = Date.parse('2026-11-13T00:00:00Z');
-const rules = rulesFrom('80, 90, pace');
+const rules = rulesFrom('80, 90, pace, summary');
 
 const person = (fields) => ({
   user_id: 'u',
@@ -19,8 +19,8 @@ const person = (fields) => ({
 });
 
 test('reads thresholds and pace', () => {
-  assert.deepEqual(rulesFrom('90,80,pace,abc,0,120'), { thresholds: [80, 90], pace: true });
-  assert.deepEqual(rulesFrom(''), { thresholds: [], pace: false });
+  assert.deepEqual(rulesFrom('90,80,pace,abc,0,120,summary'), { thresholds: [80, 90], pace: true, summary: true });
+  assert.deepEqual(rulesFrom(''), { thresholds: [], pace: false, summary: false });
 });
 
 test('groups members of one claude account and skips inactive or unknown ones', () => {
@@ -55,4 +55,29 @@ test('warns when the week is on pace to run out', () => {
   assert.equal(check(early, now, rules, undefined).text, null);
   const [slow] = accountsFrom([person({ seven_day_used: 40 })]);
   assert.equal(check(slow, now, rules, undefined).text, null);
+});
+
+test('single-model limits such as Fable alert on their own, without pace or summary', () => {
+  const resets = new Date(now + 2 * DAY).toISOString();
+  const accounts = accountsFrom([
+    person({ seven_day_used: 30, model_limits: [{ name: 'Fable', used: 85, resets_at: resets }] }),
+  ]);
+  assert.deepEqual(accounts.map((a) => a.key), ['team@x.test', 'team@x.test|fable']);
+  const fable = check(accounts[1], now, rules, undefined);
+  assert.match(fable.text, /^Claude Fable weekly limit at 85% \(Dummy\)\. Resets in 2d 0h\.$/);
+  assert.equal(fable.summary, false);
+  assert.equal(check(accounts[1], now, rules, fable.state).text, null);
+  const [, quiet] = accountsFrom([person({ model_limits: [{ name: 'Fable', used: 10, resets_at: resets }] })]);
+  assert.equal(check(quiet, now + 6.5 * DAY, rules, undefined).text, null);
+});
+
+test('weekly summary is due once in the last hour before the reset', () => {
+  const [account] = accountsFrom([person({ seven_day_used: 40 })]);
+  const early = check(account, account.resetsAt - 2 * HOUR, rules, undefined);
+  assert.equal(early.summary, false);
+  const due = check(account, account.resetsAt - 30 * 60_000, rules, early.state);
+  assert.equal(due.summary, true);
+  assert.equal(check(account, account.resetsAt - 25 * 60_000, rules, due.state).summary, true);
+  assert.equal(check(account, account.resetsAt - 25 * 60_000, rules, summarySent(due.state)).summary, false);
+  assert.equal(check(account, account.resetsAt - 30 * 60_000, rulesFrom('80'), undefined).summary, false);
 });
