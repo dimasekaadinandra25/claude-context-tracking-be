@@ -54,10 +54,17 @@ type ClaudeAccount struct {
 	Tier  string `json:"tier"`
 }
 
+type ModelLimit struct {
+	Name           string  `json:"name"`
+	UsedPercentage float64 `json:"used_percentage"`
+	ResetsAt       int64   `json:"resets_at"`
+}
+
 type PlanLimits struct {
-	FiveHour   *PlanWindow `json:"five_hour"`
-	SevenDay   *PlanWindow `json:"seven_day"`
-	CapturedAt int64       `json:"captured_at"`
+	FiveHour   *PlanWindow  `json:"five_hour"`
+	SevenDay   *PlanWindow  `json:"seven_day"`
+	Models     []ModelLimit `json:"models"`
+	CapturedAt int64        `json:"captured_at"`
 }
 
 type Overhead struct {

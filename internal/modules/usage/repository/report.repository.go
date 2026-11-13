@@ -119,7 +119,12 @@ func (r *Repository) Overview(ctx context.Context, q dto.ReportQuery) ([]dto.Per
 		       CASE WHEN pl.five_hour_resets_at > NOW() THEN pl.five_hour_resets_at END,
 		       CASE WHEN pl.seven_day_resets_at > NOW() THEN pl.seven_day_used END,
 		       CASE WHEN pl.seven_day_resets_at > NOW() THEN pl.seven_day_resets_at END,
-		       pl.captured_at, NULLIF(ca.email, ''), NULLIF(ca.plan, ''), NULLIF(ca.tier, ''),
+		       pl.captured_at, COALESCE((
+		           SELECT jsonb_agg(jsonb_build_object('name', m->>'name', 'used', (m->>'used_percentage')::float8,
+		                  'resets_at', to_timestamp((m->>'resets_at')::bigint)) ORDER BY m->>'name')
+		           FROM jsonb_array_elements(pl.model_limits) m
+		           WHERE to_timestamp((m->>'resets_at')::bigint) > NOW()), '[]'::jsonb),
+		       NULLIF(ca.email, ''), NULLIF(ca.plan, ''), NULLIF(ca.tier, ''),
 		       ls.last_request_at, k.last_used_at, k.app_version, COALESCE(u.is_active, FALSE)
 		FROM core.users u
 		LEFT JOIN h ON h.user_id = u.id
@@ -154,7 +159,7 @@ func (r *Repository) Overview(ctx context.Context, q dto.ReportQuery) ([]dto.Per
 			&p.OutputTokens, &p.SubagentRequests, &p.SubagentOutputTokens,
 			&p.InputTokens, &p.CacheWriteTokens, &p.CacheReadTokens, &p.SessionsNearFull, &p.Compactions,
 			&p.LinesAdded, &p.LinesRemoved, &p.Commits,
-			&p.FiveHourUsed, &p.FiveHourResetsAt, &p.SevenDayUsed, &p.SevenDayResetsAt, &p.LimitsCapturedAt,
+			&p.FiveHourUsed, &p.FiveHourResetsAt, &p.SevenDayUsed, &p.SevenDayResetsAt, &p.LimitsCapturedAt, &p.ModelLimits,
 			&p.ClaudeEmail, &p.ClaudePlan, &p.ClaudeTier,
 			&p.LastRequestAt, &p.LastSyncedAt, &p.AppVersion, &p.IsActive)
 		return p, err

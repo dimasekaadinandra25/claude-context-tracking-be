@@ -24,36 +24,37 @@ type Caller struct {
 }
 
 type PersonSummary struct {
-	UserID               string     `json:"user_id"`
-	FullName             string     `json:"full_name"`
-	Email                string     `json:"email"`
-	CurrentModel         string     `json:"current_model"`
-	NewContext           int64      `json:"new_context"`
-	Requests             int64      `json:"requests"`
-	Sessions             int64      `json:"sessions"`
-	OutputTokens         int64      `json:"output_tokens"`
-	SubagentRequests     int64      `json:"subagent_requests"`
-	SubagentOutputTokens int64      `json:"subagent_output_tokens"`
-	InputTokens          int64      `json:"input_tokens"`
-	CacheWriteTokens     int64      `json:"cache_write_tokens"`
-	CacheReadTokens      int64      `json:"cache_read_tokens"`
-	SessionsNearFull     int64      `json:"sessions_near_full"`
-	Compactions          int64      `json:"compactions"`
-	LinesAdded           int64      `json:"lines_added"`
-	LinesRemoved         int64      `json:"lines_removed"`
-	Commits              int64      `json:"commits"`
-	FiveHourUsed         *float64   `json:"five_hour_used"`
-	FiveHourResetsAt     *time.Time `json:"five_hour_resets_at"`
-	SevenDayUsed         *float64   `json:"seven_day_used"`
-	SevenDayResetsAt     *time.Time `json:"seven_day_resets_at"`
-	LimitsCapturedAt     *time.Time `json:"limits_captured_at"`
-	ClaudeEmail          *string    `json:"claude_email"`
-	ClaudePlan           *string    `json:"claude_plan"`
-	ClaudeTier           *string    `json:"claude_tier"`
-	LastRequestAt        *time.Time `json:"last_request_at"`
-	LastSyncedAt         *time.Time `json:"last_synced_at"`
-	AppVersion           *string    `json:"app_version"`
-	IsActive             bool       `json:"is_active"`
+	UserID               string       `json:"user_id"`
+	FullName             string       `json:"full_name"`
+	Email                string       `json:"email"`
+	CurrentModel         string       `json:"current_model"`
+	NewContext           int64        `json:"new_context"`
+	Requests             int64        `json:"requests"`
+	Sessions             int64        `json:"sessions"`
+	OutputTokens         int64        `json:"output_tokens"`
+	SubagentRequests     int64        `json:"subagent_requests"`
+	SubagentOutputTokens int64        `json:"subagent_output_tokens"`
+	InputTokens          int64        `json:"input_tokens"`
+	CacheWriteTokens     int64        `json:"cache_write_tokens"`
+	CacheReadTokens      int64        `json:"cache_read_tokens"`
+	SessionsNearFull     int64        `json:"sessions_near_full"`
+	Compactions          int64        `json:"compactions"`
+	LinesAdded           int64        `json:"lines_added"`
+	LinesRemoved         int64        `json:"lines_removed"`
+	Commits              int64        `json:"commits"`
+	FiveHourUsed         *float64     `json:"five_hour_used"`
+	FiveHourResetsAt     *time.Time   `json:"five_hour_resets_at"`
+	SevenDayUsed         *float64     `json:"seven_day_used"`
+	SevenDayResetsAt     *time.Time   `json:"seven_day_resets_at"`
+	LimitsCapturedAt     *time.Time   `json:"limits_captured_at"`
+	ModelLimits          []ModelLimit `json:"model_limits"`
+	ClaudeEmail          *string      `json:"claude_email"`
+	ClaudePlan           *string      `json:"claude_plan"`
+	ClaudeTier           *string      `json:"claude_tier"`
+	LastRequestAt        *time.Time   `json:"last_request_at"`
+	LastSyncedAt         *time.Time   `json:"last_synced_at"`
+	AppVersion           *string      `json:"app_version"`
+	IsActive             bool         `json:"is_active"`
 }
 
 type Overview struct {
@@ -96,6 +97,12 @@ type ModelSummary struct {
 	InputTokens          int64  `json:"input_tokens"`
 	CacheWriteTokens     int64  `json:"cache_write_tokens"`
 	CacheReadTokens      int64  `json:"cache_read_tokens"`
+}
+
+type ModelLimit struct {
+	Name     string    `json:"name"`
+	Used     float64   `json:"used"`
+	ResetsAt time.Time `json:"resets_at"`
 }
 
 type MemberModel struct {

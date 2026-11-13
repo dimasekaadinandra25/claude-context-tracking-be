@@ -198,6 +198,7 @@ Files live in `internal/database/migrations/core` and are named by timestamp: `Y
 | `20261103022955_session_overhead` | nullable `sessions.overhead_system_tokens`, `overhead_memory_tokens`, `overhead_agents_tokens`, `overhead_skills_tokens` |
 | `20261104010000_tool_activity_plan_limits` | new tables `usage.session_tool_hours` (calls, lines and commits per session, hour and tool) and `usage.plan_limits` (latest 5-hour and 7-day usage per member) |
 | `20261111010000_plan_history_accounts` | new tables `usage.plan_limit_readings` (every plan limit reading, seeded from `usage.plan_limits`) and `usage.claude_accounts` (Claude account email, plan and tier per member) |
+| `20261113010000_plan_model_limits` | `usage.plan_limits.model_limits` (JSONB list of single-model weekly limits such as Fable from the latest reading) |
 
 ## API
 

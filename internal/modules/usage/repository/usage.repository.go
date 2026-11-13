@@ -68,9 +68,10 @@ const insertTools = `
 	ON CONFLICT (session_id, hour, tool) DO NOTHING`
 
 const upsertPlanLimits = `
-	INSERT INTO usage.plan_limits (user_id, five_hour_used, five_hour_resets_at, seven_day_used, seven_day_resets_at, captured_at)
-	VALUES ($1, $2, $3, $4, $5, $6)
+	INSERT INTO usage.plan_limits (user_id, five_hour_used, five_hour_resets_at, seven_day_used, seven_day_resets_at, captured_at, model_limits)
+	VALUES ($1, $2, $3, $4, $5, $6, $7)
 	ON CONFLICT (user_id) DO UPDATE SET
+		model_limits = EXCLUDED.model_limits,
 		five_hour_used = EXCLUDED.five_hour_used,
 		five_hour_resets_at = EXCLUDED.five_hour_resets_at,
 		seven_day_used = EXCLUDED.seven_day_used,
@@ -102,7 +103,11 @@ func (r *Repository) SavePlanLimits(ctx context.Context, userID string, limits d
 	sevenUsed, sevenResets := planWindow(limits.SevenDay)
 	capturedAt := time.Unix(limits.CapturedAt, 0).UTC()
 	batch := &pgx.Batch{}
-	batch.Queue(upsertPlanLimits, userID, fiveUsed, fiveResets, sevenUsed, sevenResets, capturedAt)
+	models := limits.Models
+	if models == nil {
+		models = []domain.ModelLimit{}
+	}
+	batch.Queue(upsertPlanLimits, userID, fiveUsed, fiveResets, sevenUsed, sevenResets, capturedAt, models)
 	batch.Queue(insertPlanReading, userID, capturedAt, fiveUsed, sevenUsed, sevenResets)
 	return r.db.SendBatch(ctx, batch).Close()
 }

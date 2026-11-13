@@ -27,6 +27,7 @@ const (
 	maxClockSkew    = 24 * time.Hour
 	maxAccountEmail = 320
 	maxAccountName  = 100
+	maxModelLimits  = 20
 )
 
 var (
@@ -103,7 +104,20 @@ func decodePlanLimits(raw json.RawMessage, now time.Time) (domain.PlanLimits, bo
 	if limits.CapturedAt <= 0 || limits.CapturedAt > now.Add(maxClockSkew).Unix() {
 		return limits, false
 	}
+	limits.Models = validModelLimits(limits.Models)
 	return limits, validWindow(limits.FiveHour) && validWindow(limits.SevenDay)
+}
+
+func validModelLimits(models []domain.ModelLimit) []domain.ModelLimit {
+	valid := []domain.ModelLimit{}
+	for _, m := range models {
+		m.Name = strings.TrimSpace(m.Name)
+		if len(valid) < maxModelLimits && accountField(m.Name, maxModelSize) && m.Name != "" &&
+			validWindow(&domain.PlanWindow{UsedPercentage: m.UsedPercentage, ResetsAt: m.ResetsAt}) {
+			valid = append(valid, m)
+		}
+	}
+	return valid
 }
 
 func validWindow(w *domain.PlanWindow) bool {

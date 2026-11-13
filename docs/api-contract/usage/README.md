@@ -186,7 +186,7 @@ POST /usage/v1/sessions
 | `hours[].input_tokens` | int | No | Uncached input tokens billed in that hour for that model, ≥ 0. Missing = 0 |
 | `hours[].cache_write_tokens` | int | No | Cache write (creation) tokens, ≥ 0. Missing = 0 |
 | `hours[].cache_read_tokens` | int | No | Cache read tokens, ≥ 0. Missing = 0 |
-| `plan_limits` | object | No | The member's Claude plan usage from the status line: `five_hour` and `seven_day`, each `{ "used_percentage": 0-100, "resets_at": unix seconds }` and optional, plus `captured_at` (unix seconds). The newest `captured_at` wins per member. Invalid values are ignored and never fail the sync |
+| `plan_limits` | object | No | The member's Claude plan usage from Claude's usage endpoint or the status line: `five_hour` and `seven_day`, each `{ "used_percentage": 0-100, "resets_at": unix seconds }` and optional, `models`, an optional list of single-model weekly limits `{ "name": "Fable", "used_percentage": 0-100, "resets_at": unix seconds }` (at most 20; an invalid entry is dropped on its own), plus `captured_at` (unix seconds). The newest `captured_at` wins per member. Invalid values are ignored and never fail the sync |
 | `account` | object | No | The Claude account signed in to Claude Code: `email` (max 320), `plan` and `tier` (max 100 each, e.g. `default_claude_max_20x`). Ignored when invalid or when both `email` and `tier` are empty |
 | `sessions[].tools` | array | No | Activity per whole UTC hour and tool: `hour`, `tool` (1-100 characters), `calls`, `lines_added`, `lines_removed`, `commits`, each number ≥ 0. Stored in `usage.session_tool_hours`. Counts only, never commands, code or file names |
 | `sessions[].overhead` | object | No | Fixed context overhead of the session: `system_tokens`, `memory_tokens`, `agents_tokens`, `skills_tokens`, each an int ≥ 0 (missing key = 0). Stored on `usage.sessions` (`overhead_*_tokens`). Sent values replace the stored ones; omitting `overhead` leaves them unchanged |
@@ -353,7 +353,7 @@ A member gets a single entry: themselves.
 
 ---
 
-Overview rows also carry `lines_added`, `lines_removed` and `commits` in the range (totals `total_lines_added`, `total_lines_removed`, `total_commits`), and the member's latest plan limits regardless of range: `five_hour_used`, `five_hour_resets_at`, `seven_day_used`, `seven_day_resets_at` (each `null` when never sent or once the window has reset) and `limits_captured_at`, plus the Claude account last sent: `claude_email`, `claude_plan`, `claude_tier` (`null` when never sent).
+Overview rows also carry `lines_added`, `lines_removed` and `commits` in the range (totals `total_lines_added`, `total_lines_removed`, `total_commits`), and the member's latest plan limits regardless of range: `five_hour_used`, `five_hour_resets_at`, `seven_day_used`, `seven_day_resets_at` (each `null` when never sent or once the window has reset) and `limits_captured_at`, `model_limits` (the single-model weekly limits of that reading as `{ "name", "used", "resets_at" }`, expired ones left out, `[]` when none), plus the Claude account last sent: `claude_email`, `claude_plan`, `claude_tier` (`null` when never sent).
 
 ### 3. Timeseries
 

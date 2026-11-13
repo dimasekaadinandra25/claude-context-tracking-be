@@ -182,8 +182,41 @@ func TestPlanLimitsKeepNewestAndHideExpiredWindows(t *testing.T) {
 	}
 
 	send(limits(t, 70, now.Add(-time.Minute), now.Add(time.Minute)))
-	if p := person(); p.FiveHourUsed != nil || p.SevenDayUsed != nil || p.LimitsCapturedAt == nil {
+	if p := person(); p.FiveHourUsed != nil || p.SevenDayUsed != nil || p.LimitsCapturedAt == nil || len(p.ModelLimits) != 0 {
 		t.Fatalf("expired windows should read as nil: %+v", p)
+	}
+}
+
+func TestModelLimitsAreStoredValidatedAndHiddenOnceExpired(t *testing.T) {
+	pool := testdb.Open(t)
+	ctx := context.Background()
+	a := testdb.User(t, pool, "a@test.local", false)
+	svc := New(repository.New(pool))
+	now := time.Now().Truncate(time.Second)
+	resets := now.Add(5 * 24 * time.Hour)
+	raw, err := json.Marshal(domain.PlanLimits{
+		SevenDay: &domain.PlanWindow{UsedPercentage: 20, ResetsAt: resets.Unix()},
+		Models: []domain.ModelLimit{
+			{Name: " Fable ", UsedPercentage: 4, ResetsAt: resets.Unix()},
+			{Name: "Gone", UsedPercentage: 9, ResetsAt: now.Add(-time.Hour).Unix()},
+			{Name: "Bad", UsedPercentage: 140, ResetsAt: resets.Unix()},
+			{Name: "", UsedPercentage: 1, ResetsAt: resets.Unix()},
+		},
+		CapturedAt: now.Unix(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Ingest(ctx, a, dto.IngestRequest{Machine: "PC", PlanLimits: raw}); err != nil {
+		t.Fatal(err)
+	}
+	ov, err := svc.Overview(ctx, dto.Caller{UserID: a}, week())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ov.People[0].ModelLimits
+	if len(got) != 1 || got[0].Name != "Fable" || got[0].Used != 4 || !got[0].ResetsAt.Equal(resets) {
+		t.Fatalf("model limits = %+v", got)
 	}
 }
 
