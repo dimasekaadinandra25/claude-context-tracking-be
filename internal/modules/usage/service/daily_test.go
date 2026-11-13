@@ -38,7 +38,7 @@ func TestDailyUsageJoinsTokensWithLimitUsedPerDay(t *testing.T) {
 
 	ingest(t, svc, a, withHours("s1",
 		dto.HourPayload{Hour: at("2026-10-29T09:00:00Z"), Model: "m", Requests: 3, InputTokens: 10, CacheWriteTokens: 20, CacheReadTokens: 300, OutputTokens: 40},
-		dto.HourPayload{Hour: at("2026-10-30T23:00:00Z"), Model: "m", Requests: 1, InputTokens: 1, OutputTokens: 2},
+		dto.HourPayload{Hour: at("2026-10-30T23:00:00Z"), Model: "m", Requests: 1, InputTokens: 1, OutputTokens: 2, SubagentRequests: 2, SubagentOutputTokens: 5},
 	))
 	window := at("2026-11-02T09:00:00Z")
 	send(weekly(t, 4, window, at("2026-10-28T20:00:00Z")))
@@ -54,7 +54,7 @@ func TestDailyUsageJoinsTokensWithLimitUsedPerDay(t *testing.T) {
 	f := func(v float64) *float64 { return &v }
 	want := []dto.DailyUsage{
 		{UserID: a, Day: "2026-10-29", InputTokens: 10, CacheWriteTokens: 20, CacheReadTokens: 300, OutputTokens: 40, Requests: 3, SevenDayUsed: f(12), LimitUsed: f(8)},
-		{UserID: a, Day: "2026-10-30", InputTokens: 1, OutputTokens: 2, Requests: 1, SevenDayUsed: f(30), LimitUsed: f(18)},
+		{UserID: a, Day: "2026-10-30", InputTokens: 1, OutputTokens: 7, Requests: 3, SevenDayUsed: f(30), LimitUsed: f(18)},
 		{UserID: a, Day: "2026-10-31", SevenDayUsed: f(5), LimitUsed: f(5)},
 	}
 	if len(days) != len(want) {
@@ -76,7 +76,7 @@ func TestDailyUsageJoinsTokensWithLimitUsedPerDay(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(days) != 3 || days[0].Day != "2026-10-29" || *days[0].LimitUsed != 6 || days[1].Day != "2026-10-30" ||
-		*days[1].LimitUsed != 2 || days[2].Day != "2026-10-31" || days[2].OutputTokens != 2 || *days[2].LimitUsed != 23 || *days[2].SevenDayUsed != 5 {
+		*days[1].LimitUsed != 2 || days[2].Day != "2026-10-31" || days[2].OutputTokens != 7 || *days[2].LimitUsed != 23 || *days[2].SevenDayUsed != 5 {
 		t.Fatalf("local days = %+v", days)
 	}
 }
@@ -245,6 +245,7 @@ func TestMemberModelsSplitUsagePerMemberAndModelAndHideOthersFromMembers(t *test
 	ingest(t, svc, a, withHours("a1",
 		dto.HourPayload{Hour: at("2026-10-30T02:00:00Z"), Model: "claude-opus-5-5", Requests: 3, CacheReadTokens: 900, OutputTokens: 10},
 		dto.HourPayload{Hour: at("2026-10-30T03:00:00Z"), Model: "claude-haiku-5-5", Requests: 1, InputTokens: 50},
+		dto.HourPayload{Hour: at("2026-10-30T04:00:00Z"), Model: "claude-fable-5-2", SubagentRequests: 4, SubagentOutputTokens: 20, CacheReadTokens: 100},
 	))
 	ingest(t, svc, b, withHours("b1",
 		dto.HourPayload{Hour: at("2026-10-30T04:00:00Z"), Model: "claude-opus-5-5", Requests: 2, CacheWriteTokens: 70},
@@ -258,7 +259,8 @@ func TestMemberModelsSplitUsagePerMemberAndModelAndHideOthersFromMembers(t *test
 	for _, m := range all {
 		got[m.Email+" "+m.Model] = m
 	}
-	if len(all) != 3 || got["a@test.local claude-opus-5-5"].Requests != 3 || got["a@test.local claude-opus-5-5"].CacheReadTokens != 900 ||
+	if len(all) != 4 || got["a@test.local claude-fable-5-2"].Requests != 4 || got["a@test.local claude-fable-5-2"].OutputTokens != 20 ||
+		got["a@test.local claude-opus-5-5"].Requests != 3 || got["a@test.local claude-opus-5-5"].CacheReadTokens != 900 ||
 		got["a@test.local claude-haiku-5-5"].InputTokens != 50 || got["b@test.local claude-opus-5-5"].CacheWriteTokens != 70 {
 		t.Fatalf("member models = %+v", all)
 	}

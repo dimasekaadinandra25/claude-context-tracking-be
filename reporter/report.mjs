@@ -1,7 +1,8 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
-import { dueDay, hooksFrom, localNow, redact, requestFor } from './hooks.mjs';
+import { accountsFrom, check, rulesFrom } from './alerts.mjs';
+import { dueDay, hooksFrom, localNow, redact, requestFor, textRequestFor } from './hooks.mjs';
 
 const env = (name, fallback) => process.env[name]?.trim() || fallback;
 
@@ -13,8 +14,13 @@ const SEND_AT = env('REPORT_TIME', '09:00');
 const TIME_ZONE = env('REPORT_TZ', 'Asia/Jakarta');
 const THEME = env('REPORT_THEME', 'dark');
 const LOCALE = env('REPORT_LOCALE', 'en-US');
+const LANGUAGE = env('REPORT_LANG', 'en');
 const MESSAGE = env('REPORT_MESSAGE', 'Claude usage report {date}');
+const STATE_FILE = env('REPORT_STATE_FILE', '/state/reporter.json');
+const ALERTS = process.env.REPORT_ALERTS ?? '80,90,pace';
 const CHECK_MS = 30_000;
+const ALERT_CHECK_MS = 5 * 60_000;
+const DAY_MS = 86_400_000;
 const RETRY_MS = 10 * 60_000;
 const MAX_TRIES = 3;
 const LOAD_TIMEOUT_MS = 60_000;
@@ -53,16 +59,17 @@ async function capture() {
       async (route) => route.fulfill({ response: await route.fetch({ url: internal(route.request().url()) }) })
     );
     await context.addInitScript(
-      ({ access, refresh, theme }) => {
+      ({ access, refresh, theme, language }) => {
         sessionStorage.setItem('claude_usage.access_token', access);
         localStorage.setItem('claude_usage.refresh_token', refresh);
         localStorage.setItem('theme-mode', theme);
+        localStorage.setItem('i18nextLng', language);
       },
-      { access: session.access_token, refresh: session.refresh_token, theme: THEME }
+      { access: session.access_token, refresh: session.refresh_token, theme: THEME, language: LANGUAGE }
     );
     const page = await context.newPage();
     await page.goto(`${PUBLIC_DASHBOARD_URL}/dashboard/overview`, { waitUntil: 'networkidle' });
-    const button = page.getByRole('button', { name: 'Export image' });
+    const button = page.getByTestId('export-image');
     await button.waitFor({ timeout: LOAD_TIMEOUT_MS });
     const [download] = await Promise.all([
       page.waitForEvent('download', { timeout: EXPORT_TIMEOUT_MS }),
@@ -74,10 +81,26 @@ async function capture() {
   }
 }
 
-async function send(hooks, png, fileName, message) {
+async function loadState() {
+  try {
+    return JSON.parse(await readFile(STATE_FILE, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+async function saveState(state) {
+  try {
+    await writeFile(STATE_FILE, JSON.stringify(state));
+  } catch (error) {
+    log(`could not save ${STATE_FILE}: ${error.message}`);
+  }
+}
+
+async function send(hooks, build) {
   let failed = 0;
   for (const hook of hooks) {
-    const { url, init } = requestFor(hook, png, fileName, message);
+    const { url, init } = build(hook);
     try {
       const res = await fetch(url, init);
       if (res.ok) {
@@ -97,17 +120,58 @@ async function send(hooks, png, fileName, message) {
 async function report(hooks, day) {
   const { png, fileName } = await capture();
   log(`captured ${fileName} (${png.length} bytes)`);
-  const failed = await send(hooks, png, fileName, MESSAGE.replace('{date}', day));
+  const message = MESSAGE.replace('{date}', day);
+  const failed = await send(hooks, (hook) => requestFor(hook, png, fileName, message));
   if (failed === hooks.length) throw new Error('no webhook accepted the report');
+}
+
+const notify = (hooks, text) => send(hooks, (hook) => textRequestFor(hook, text));
+
+async function people() {
+  const session = await signIn();
+  const to = new Date();
+  const params = new URLSearchParams({
+    from: new Date(to.getTime() - DAY_MS).toISOString(),
+    to: to.toISOString(),
+    tz: TIME_ZONE,
+  });
+  const res = await fetch(`${API_URL}/usage/v1/overview?${params}`, {
+    headers: { Authorization: `Bearer ${session.access_token}` },
+  });
+  if (!res.ok) throw new Error(`overview failed with ${res.status}`);
+  return (await res.json()).data.people;
+}
+
+async function checkAlerts(hooks, rules, state) {
+  const now = Date.now();
+  const alerts = { ...state.alerts };
+  for (const account of accountsFrom(await people())) {
+    const { state: next, text } = check(account, now, rules, alerts[account.key]);
+    alerts[account.key] = next;
+    if (text) {
+      log(`alert: ${text}`);
+      await notify(hooks, text);
+    }
+  }
+  state.alerts = alerts;
+  await saveState(state);
 }
 
 async function main() {
   const hooks = hooksFrom(process.env.REPORT_WEBHOOKS);
   const today = () => localNow(new Date(), TIME_ZONE).day;
 
+  const rules = rulesFrom(ALERTS);
+  const state = await loadState();
+
   if (process.argv.includes('--now')) {
     if (hooks.length === 0) throw new Error('REPORT_WEBHOOKS is empty');
     await report(hooks, today());
+    return;
+  }
+  if (process.argv.includes('--alerts')) {
+    if (hooks.length === 0) throw new Error('REPORT_WEBHOOKS is empty');
+    await checkAlerts(hooks, rules, state);
     return;
   }
   if (hooks.length === 0) {
@@ -116,27 +180,44 @@ async function main() {
     return;
   }
 
-  let lastDay = localNow(new Date(), TIME_ZONE).time >= SEND_AT ? today() : null;
+  if (!state.lastDay && localNow(new Date(), TIME_ZONE).time >= SEND_AT) {
+    state.lastDay = today();
+    await saveState(state);
+  }
   let tries = 0;
   let nextTry = 0;
-  log(`sending daily at ${SEND_AT} ${TIME_ZONE} to ${hooks.length} webhook(s)`);
+  let busy = false;
+  log(`sending daily at ${SEND_AT} ${TIME_ZONE} to ${hooks.length} webhook(s), last sent ${state.lastDay ?? 'never'}`);
   setInterval(async () => {
-    const day = dueDay(new Date(), TIME_ZONE, SEND_AT, lastDay);
-    if (!day || Date.now() < nextTry) return;
+    const day = dueDay(new Date(), TIME_ZONE, SEND_AT, state.lastDay);
+    if (!day || busy || Date.now() < nextTry) return;
+    busy = true;
     nextTry = Date.now() + RETRY_MS;
     try {
       await report(hooks, day);
-      lastDay = day;
+      state.lastDay = day;
       tries = 0;
+      await saveState(state);
     } catch (error) {
       tries += 1;
       log(`report for ${day} failed (try ${tries}/${MAX_TRIES}): ${error.message}`);
       if (tries >= MAX_TRIES) {
-        lastDay = day;
+        state.lastDay = day;
         tries = 0;
+        await saveState(state);
+        await notify(hooks, `Claude usage report for ${day} failed after ${MAX_TRIES} tries: ${error.message}`);
       }
+    } finally {
+      busy = false;
     }
   }, CHECK_MS);
+
+  if (rules.thresholds.length === 0 && !rules.pace) return;
+  log(`checking limits every ${ALERT_CHECK_MS / 60_000} min for ${ALERTS}`);
+  const alertTick = () =>
+    checkAlerts(hooks, rules, state).catch((error) => log(`limit check failed: ${error.message}`));
+  alertTick();
+  setInterval(alertTick, ALERT_CHECK_MS);
 }
 
 main().catch((error) => {

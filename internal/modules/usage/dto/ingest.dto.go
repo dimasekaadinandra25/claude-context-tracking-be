@@ -57,8 +57,9 @@ type HourPayload struct {
 }
 
 type IngestResponse struct {
-	Accepted int         `json:"accepted"`
-	Rejected []Rejection `json:"rejected"`
+	Accepted         int         `json:"accepted"`
+	Rejected         []Rejection `json:"rejected"`
+	LatestAppVersion string      `json:"latest_app_version,omitempty"`
 }
 
 type Rejection struct {

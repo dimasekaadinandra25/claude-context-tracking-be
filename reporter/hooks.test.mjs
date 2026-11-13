@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { dueDay, hooksFrom, kindOf, localNow, redact, requestFor } from './hooks.mjs';
+import { dueDay, hooksFrom, kindOf, localNow, redact, requestFor, textRequestFor } from './hooks.mjs';
 
 const png = new Uint8Array([137, 80, 78, 71]);
 
@@ -54,4 +54,20 @@ test('is due once per local day after the send time', () => {
 test('never logs the secret part of a webhook url', () => {
   assert.equal(redact('https://discord.com/api/webhooks/123/SECRET'), 'https://discord.com/…');
   assert.ok(!redact('https://api.telegram.org/bot1:SECRET/sendPhoto').includes('SECRET'));
+});
+
+test('sends plain text alerts in each webhook format', async () => {
+  const [discord, telegram, wa] = hooksFrom(
+    '[{"url":"https://discord.com/api/webhooks/1/a"},{"url":"https://api.telegram.org/bot1:x/sendPhoto","fields":{"chat_id":"5"}},{"url":"https://api.fonnte.com/send","fields":{"target":"0812"}}]'
+  );
+  const d = textRequestFor(discord, 'hi');
+  assert.equal(d.init.body, '{"content":"hi"}');
+  assert.equal(d.init.headers['Content-Type'], 'application/json');
+  const t = textRequestFor(telegram, 'hi');
+  assert.equal(t.url, 'https://api.telegram.org/bot1:x/sendMessage');
+  assert.equal(t.init.body.get('text'), 'hi');
+  assert.equal(t.init.body.get('chat_id'), '5');
+  const w = textRequestFor(wa, 'hi');
+  assert.equal(w.init.body.get('message'), 'hi');
+  assert.equal(w.init.body.get('target'), '0812');
 });

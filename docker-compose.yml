@@ -76,9 +76,13 @@ services:
       REPORT_TZ: ${REPORT_TZ:-Asia/Jakarta}
       REPORT_THEME: ${REPORT_THEME:-dark}
       REPORT_LOCALE: ${REPORT_LOCALE:-en-US}
+      REPORT_LANG: ${REPORT_LANG:-en}
       REPORT_MESSAGE: ${REPORT_MESSAGE:-Claude usage report {date}}
       REPORT_EMAIL: ${REPORT_EMAIL:-}
       REPORT_PASSWORD: ${REPORT_PASSWORD:-}
+      REPORT_ALERTS: ${REPORT_ALERTS-80,90,pace}
+    volumes:
+      - reporter-state:/state
     shm_size: 1gb
     init: true
     depends_on: [api, dashboard]
@@ -86,3 +90,4 @@ services:
 
 volumes:
   pgdata:
+  reporter-state:

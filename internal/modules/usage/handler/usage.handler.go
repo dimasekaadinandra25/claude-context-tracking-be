@@ -39,9 +39,13 @@ func (h *Handler) Ingest(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "Invalid request payload", err.Error())
 		return
 	}
+	version := c.GetHeader("X-App-Version")
 	res, err := h.service.Ingest(c.Request.Context(), middleware.MustGetUserID(c), req)
 	if err == nil {
-		err = h.service.RecordAppVersion(c.Request.Context(), middleware.GetApiKeyID(c), c.GetHeader("X-App-Version"))
+		err = h.service.RecordAppVersion(c.Request.Context(), middleware.GetApiKeyID(c), version)
+	}
+	if err == nil && version != "" {
+		res.LatestAppVersion, err = h.service.LatestAppVersion(c.Request.Context())
 	}
 	if err != nil {
 		logger.Error("Failed to save usage", logger.Err(err))

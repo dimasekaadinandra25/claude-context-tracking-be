@@ -141,7 +141,7 @@ Without `RESTORE_CONFIRM=yes` the target only prints what it would do. The dumps
 
 ## Daily Report
 
-The `reporter` service (Playwright on Chromium, `reporter/`) sends the dashboard's **Export image** PNG to webhooks once a day. At `REPORT_TIME` in `REPORT_TZ` it signs in to the API as `REPORT_EMAIL` / `REPORT_PASSWORD` (use a dashboard admin so every member is in the report), opens the overview inside the Docker network, clicks **Export image** and posts the file to every URL in `REPORT_WEBHOOKS`. It sends at most once per day, retries a failed day up to 3 times 10 minutes apart, never sends for a day it started after `REPORT_TIME`, and stays idle when `REPORT_WEBHOOKS` is empty. Logs show only the host of each webhook (`docker compose logs reporter`).
+The `reporter` service (Playwright on Chromium, `reporter/`) sends the dashboard's **Export image** PNG to webhooks once a day. At `REPORT_TIME` in `REPORT_TZ` it signs in to the API as `REPORT_EMAIL` / `REPORT_PASSWORD` (use a dashboard admin so every member is in the report), opens the overview inside the Docker network, clicks **Export image** and posts the file to every URL in `REPORT_WEBHOOKS`. It sends at most once per day and remembers the last day it sent in the `reporter-state` volume, so after the PC or Docker was off it sends the missed report as soon as it is back, and a restart never sends twice. A failed day is retried up to 3 times 10 minutes apart, then a short text saying it failed is posted to the same webhooks. It stays idle when `REPORT_WEBHOOKS` is empty. Set `REPORT_LANG=id` for Bahasa Indonesia labels and `REPORT_LOCALE=id-ID` for numbers like 97,3%. Logs show only the host of each webhook (`docker compose logs reporter`).
 
 | Webhook | How to set it | What is sent |
 |---------|---------------|--------------|
@@ -155,6 +155,10 @@ A JSON entry can also set `kind` (`discord`, `telegram`, `generic`), `file_field
 ```bash
 make report-now
 ```
+
+### Limit alerts
+
+Every 5 minutes the reporter also reads each Claude account's weekly limit and posts a text to the same webhooks when it passes a percentage in `REPORT_ALERTS` (default `80,90,pace`). `pace` warns once when the account is on pace to run out before the reset (at least a day into the week, below the first percentage). Each alert is sent once per weekly window. Leave `REPORT_ALERTS` empty to turn alerts off. Check now with `docker compose run --rm reporter node report.mjs --alerts`.
 
 ## Tests
 

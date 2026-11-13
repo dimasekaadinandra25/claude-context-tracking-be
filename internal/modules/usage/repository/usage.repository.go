@@ -186,6 +186,14 @@ func (r *Repository) SaveSession(ctx context.Context, s domain.Session, overhead
 	return true, tx.Commit(ctx)
 }
 
+func (r *Repository) AppVersions(ctx context.Context) ([]string, error) {
+	rows, err := r.db.Query(ctx, `SELECT DISTINCT app_version FROM core.api_keys WHERE app_version IS NOT NULL AND deleted_at IS NULL`)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
 func (r *Repository) SetAppVersion(ctx context.Context, keyID, version string) error {
 	_, err := r.db.Exec(ctx, `UPDATE core.api_keys SET app_version = $2 WHERE key_id = $1 AND deleted_at IS NULL`, keyID, version)
 	return err

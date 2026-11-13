@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -27,7 +29,10 @@ const (
 	maxAccountName  = 100
 )
 
-var appVersionPattern = regexp.MustCompile(`^[0-9A-Za-z.+_-]{1,32}$`)
+var (
+	appVersionPattern = regexp.MustCompile(`^[0-9A-Za-z.+_-]{1,32}$`)
+	versionNumber     = regexp.MustCompile(`\d+`)
+)
 
 type Service struct {
 	repo *repository.Repository
@@ -111,6 +116,33 @@ func (s *Service) RecordAppVersion(ctx context.Context, keyID, version string) e
 		return nil
 	}
 	return s.repo.SetAppVersion(ctx, keyID, version)
+}
+
+func (s *Service) LatestAppVersion(ctx context.Context) (string, error) {
+	versions, err := s.repo.AppVersions(ctx)
+	if err != nil {
+		return "", err
+	}
+	return newestVersion(versions), nil
+}
+
+func newestVersion(versions []string) string {
+	newest := ""
+	for _, v := range versions {
+		if newest == "" || slices.Compare(versionParts(v), versionParts(newest)) > 0 {
+			newest = v
+		}
+	}
+	return newest
+}
+
+func versionParts(version string) []int {
+	parts := []int{}
+	for _, number := range versionNumber.FindAllString(version, -1) {
+		n, _ := strconv.Atoi(number)
+		parts = append(parts, n)
+	}
+	return parts
 }
 
 func decode(raw json.RawMessage) (dto.SessionPayload, error) {

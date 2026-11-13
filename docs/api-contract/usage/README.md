@@ -202,13 +202,15 @@ The body may be at most 64 MB.
 - A session whose `latest_at` is older than the stored `last_request_at` is stale (a slower, older send that arrived late). It is skipped without touching the stored session or its hours and still counts as `accepted`. An equal `latest_at` replaces the stored values.
 - `api_keys.last_used_at` is updated on every call. Reports show it as `last_synced_at`.
 - `api_keys.app_version` is set from a valid `X-App-Version` header after the batch is saved. A call without the header leaves it unchanged. Reports show it as `app_version`.
+- When the call sends `X-App-Version`, `latest_app_version` is the newest version any active API key has reported, compared number by number (`0.10.0` is newer than `0.9.1`). The app shows an update notice when it is newer than its own.
 
 **Response (200):**
 ```json
 {
   "data": {
     "accepted": 1,
-    "rejected": []
+    "rejected": [],
+    "latest_app_version": "0.2.0"
   },
   "message": "Usage saved"
 }
@@ -517,7 +519,7 @@ Takes the report parameters. Returns one row per member and local day in the ran
 ]
 ```
 
-`seven_day_used` is the last 7-day reading of that day and `limit_used` the percentage points of the 7-day limit used that day, summed between readings and restarting when the window resets. Both are `null` on days without a reading. Members whose apps report the same Claude account email (case-insensitive) share one account: their readings are merged into one timeline, so `seven_day_used` and `limit_used` are the account's, every member of the account gets a row on days the account was used, `account_weight` is the account's input + cache + 5 × output that day and `account_members` how many members share it (1 for a member on their own account). Overview `five_hour_used`, `seven_day_used` and their reset times are likewise the newest reading from anyone on the account. Members only see their own rows.
+`requests` and `output_tokens` include subagent requests and their output. `seven_day_used` is the last 7-day reading of that day and `limit_used` the percentage points of the 7-day limit used that day, summed between readings and restarting when the window resets. Both are `null` on days without a reading. Members whose apps report the same Claude account email (case-insensitive) share one account: their readings are merged into one timeline, so `seven_day_used` and `limit_used` are the account's, every member of the account gets a row on days the account was used, `account_weight` is the account's input + cache + 5 × output that day and `account_members` how many members share it (1 for a member on their own account). Overview `five_hour_used`, `seven_day_used` and their reset times are likewise the newest reading from anyone on the account. Members only see their own rows.
 
 ---
 
@@ -527,7 +529,7 @@ Takes the report parameters. Returns one row per member and local day in the ran
 GET /usage/v1/member-models?from=...&to=...
 ```
 
-Takes the report parameters. Returns usage per member and model in the range, ordered by member name, email and model:
+Takes the report parameters. Returns usage per member and model in the range, ordered by member name, email and model. `requests` and `output_tokens` include subagent requests and their output, so a model used only by subagents is counted:
 
 ```json
 [

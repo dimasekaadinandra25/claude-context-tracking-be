@@ -215,9 +215,9 @@ func scanToolSummaries(rows pgx.Rows) ([]dto.ToolSummary, error) {
 func (r *Repository) MemberModels(ctx context.Context, q dto.ReportQuery) ([]dto.MemberModel, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT u.id::text, COALESCE(u.full_name, ''), u.email, h.model,
-		       SUM(h.requests)::bigint, COUNT(DISTINCT h.session_id),
+		       SUM(h.requests + h.subagent_requests)::bigint, COUNT(DISTINCT h.session_id),
 		       SUM(h.input_tokens)::bigint, SUM(h.cache_write_tokens)::bigint,
-		       SUM(h.cache_read_tokens)::bigint, SUM(h.output_tokens)::bigint
+		       SUM(h.cache_read_tokens)::bigint, SUM(h.output_tokens + h.subagent_output_tokens)::bigint
 		FROM usage.session_hours h
 		JOIN core.users u ON u.id = h.user_id
 		WHERE h.hour >= $1 AND h.hour < $2 AND ($3::uuid IS NULL OR h.user_id = $3::uuid) AND u.deleted_at IS NULL
@@ -264,9 +264,9 @@ func (r *Repository) Daily(ctx context.Context, q dto.ReportQuery) ([]dto.DailyU
 			       SUM(h.input_tokens)::bigint AS input_tokens,
 			       SUM(h.cache_write_tokens)::bigint AS cache_write_tokens,
 			       SUM(h.cache_read_tokens)::bigint AS cache_read_tokens,
-			       SUM(h.output_tokens)::bigint AS output_tokens,
-			       SUM(h.requests)::bigint AS requests,
-			       SUM(h.input_tokens + h.cache_write_tokens + h.cache_read_tokens + 5 * h.output_tokens)::bigint AS weight
+			       SUM(h.output_tokens + h.subagent_output_tokens)::bigint AS output_tokens,
+			       SUM(h.requests + h.subagent_requests)::bigint AS requests,
+			       SUM(h.input_tokens + h.cache_write_tokens + h.cache_read_tokens + 5 * (h.output_tokens + h.subagent_output_tokens))::bigint AS weight
 			FROM usage.session_hours h
 			JOIN accounts a ON a.user_id = h.user_id
 			WHERE h.hour >= $1 AND h.hour < $2 AND a.account IN (SELECT account FROM scope)

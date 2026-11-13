@@ -47,6 +47,32 @@ export function requestFor(hook, png, fileName, message) {
   return { url: hook.url, init: { method: 'POST', headers: hook.headers, body: form } };
 }
 
+export function textRequestFor(hook, text) {
+  if (hook.kind === 'discord') {
+    return {
+      url: hook.url,
+      init: {
+        method: 'POST',
+        headers: { ...hook.headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [hook.message_field]: text }),
+      },
+    };
+  }
+  const form = new FormData();
+  for (const [name, value] of Object.entries(hook.fields)) {
+    form.append(name, String(value));
+  }
+  if (hook.kind === 'telegram') {
+    form.append('text', text);
+    return {
+      url: hook.url.replace(/\/send\w+/, '/sendMessage'),
+      init: { method: 'POST', headers: hook.headers, body: form },
+    };
+  }
+  form.append(hook.message_field, text);
+  return { url: hook.url, init: { method: 'POST', headers: hook.headers, body: form } };
+}
+
 export function localNow(date, timeZone) {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-CA', {
