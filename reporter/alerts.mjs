@@ -4,6 +4,8 @@ const WEEK_MS = 7 * DAY_MS;
 const SUMMARY_LEAD_MS = HOUR_MS;
 const PACE = 'pace';
 const SUMMARY = 'summary';
+const STALE = 'stale';
+const STALE_MS = 24 * HOUR_MS;
 const FULL = 100;
 
 export function rulesFrom(text) {
@@ -12,11 +14,16 @@ export function rulesFrom(text) {
     .map((part) => part.trim().toLowerCase())
     .filter(Boolean);
   const thresholds = parts
-    .filter((part) => part !== PACE && part !== SUMMARY)
+    .filter((part) => ![PACE, SUMMARY, STALE].includes(part))
     .map(Number)
     .filter((value) => Number.isFinite(value) && value > 0 && value <= FULL)
     .sort((a, b) => a - b);
-  return { thresholds, pace: parts.includes(PACE), summary: parts.includes(SUMMARY) };
+  return {
+    thresholds,
+    pace: parts.includes(PACE),
+    summary: parts.includes(SUMMARY),
+    stale: parts.includes(STALE),
+  };
 }
 
 export function accountsFrom(people) {
@@ -91,4 +98,22 @@ export function check(account, now, rules, previous) {
 
 export function summarySent(state) {
   return { ...state, sent: [...state.sent, SUMMARY] };
+}
+
+export function staleMembers(people, now, previous = {}) {
+  const state = {};
+  const alerts = [];
+  for (const person of people) {
+    if (person.is_active === false || !person.last_synced_at) continue;
+    const syncedAt = Date.parse(person.last_synced_at);
+    if (now - syncedAt < STALE_MS) continue;
+    state[person.user_id] = person.last_synced_at;
+    if (previous[person.user_id] === person.last_synced_at) continue;
+    alerts.push({
+      name: person.full_name || person.email,
+      syncedAt,
+      hours: Math.floor((now - syncedAt) / HOUR_MS),
+    });
+  }
+  return { state, alerts };
 }

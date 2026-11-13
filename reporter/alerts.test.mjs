@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { accountsFrom, check, rulesFrom, summarySent } from './alerts.mjs';
+import { accountsFrom, check, rulesFrom, staleMembers, summarySent } from './alerts.mjs';
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -19,8 +19,8 @@ const person = (fields) => ({
 });
 
 test('reads thresholds and pace', () => {
-  assert.deepEqual(rulesFrom('90,80,pace,abc,0,120,summary'), { thresholds: [80, 90], pace: true, summary: true });
-  assert.deepEqual(rulesFrom(''), { thresholds: [], pace: false, summary: false });
+  assert.deepEqual(rulesFrom('90,80,pace,abc,0,120,summary,stale'), { thresholds: [80, 90], pace: true, summary: true, stale: true });
+  assert.deepEqual(rulesFrom(''), { thresholds: [], pace: false, summary: false, stale: false });
 });
 
 test('groups members of one claude account and skips inactive or unknown ones', () => {
@@ -80,4 +80,22 @@ test('weekly summary is due once in the last hour before the reset', () => {
   assert.equal(check(account, account.resetsAt - 25 * 60_000, rules, due.state).summary, true);
   assert.equal(check(account, account.resetsAt - 25 * 60_000, rules, summarySent(due.state)).summary, false);
   assert.equal(check(account, account.resetsAt - 30 * 60_000, rulesFrom('80'), undefined).summary, false);
+});
+
+test('a member whose app stopped syncing for 24h is reported once until it syncs again', () => {
+  const at = (hours) => new Date(now - hours * HOUR).toISOString();
+  const people = [
+    person({ user_id: 'a', full_name: 'Dummy 1', last_synced_at: at(30) }),
+    person({ user_id: 'b', full_name: 'Dummy 2', last_synced_at: at(2) }),
+    person({ user_id: 'c', full_name: 'Gone', is_active: false, last_synced_at: at(90) }),
+    person({ user_id: 'd', full_name: 'New', last_synced_at: null }),
+  ];
+  const first = staleMembers(people, now, undefined);
+  assert.deepEqual(first.alerts.map((a) => [a.name, a.hours]), [['Dummy 1', 30]]);
+  assert.deepEqual(staleMembers(people, now, first.state).alerts, []);
+  people[0].last_synced_at = at(1);
+  const back = staleMembers(people, now, first.state);
+  assert.deepEqual(back.state, {});
+  people[0].last_synced_at = at(26);
+  assert.equal(staleMembers(people, now, back.state).alerts.length, 1);
 });

@@ -158,7 +158,7 @@ make report-now
 
 ### Limit alerts
 
-Every 5 minutes the reporter also reads each Claude account's weekly limit, and every single-model weekly limit Claude reports (such as Fable), and posts a text to the same webhooks when one passes a percentage in `REPORT_ALERTS` (default `80,90,pace,summary`). `pace` warns once when the account is on pace to run out before the reset (at least a day into the week, below the first percentage). `summary` posts the report image once during the last hour before the weekly reset, as a record of the finished week; a failed send is retried on the next check. Each alert is sent once per weekly window. Leave `REPORT_ALERTS` empty to turn alerts off. Check now with `docker compose run --rm reporter node report.mjs --alerts`.
+Every 5 minutes the reporter also reads each Claude account's weekly limit, and every single-model weekly limit Claude reports (such as Fable), and posts a text to the same webhooks when one passes a percentage in `REPORT_ALERTS` (default `80,90,pace,summary,stale`). `pace` warns once when the account is on pace to run out before the reset (at least a day into the week, below the first percentage). `summary` posts the report image once during the last hour before the weekly reset, as a record of the finished week; a failed send is retried on the next check. `stale` warns once when an active member's app has not synced for 24 hours (for example the PC is off or the app was closed), and again only after it has synced and stopped again. Each limit alert is sent once per weekly window. Leave `REPORT_ALERTS` empty to turn alerts off. Check now with `docker compose run --rm reporter node report.mjs --alerts`.
 
 ## Tests
 

@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
-import { accountsFrom, check, rulesFrom, summarySent } from './alerts.mjs';
+import { accountsFrom, check, rulesFrom, staleMembers, summarySent } from './alerts.mjs';
 import { dueDay, hooksFrom, localNow, redact, requestFor, textRequestFor } from './hooks.mjs';
 
 const env = (name, fallback) => process.env[name]?.trim() || fallback;
@@ -17,7 +17,7 @@ const LOCALE = env('REPORT_LOCALE', 'en-US');
 const LANGUAGE = env('REPORT_LANG', 'en');
 const MESSAGE = env('REPORT_MESSAGE', 'Claude usage report {date}');
 const STATE_FILE = env('REPORT_STATE_FILE', '/state/reporter.json');
-const ALERTS = process.env.REPORT_ALERTS ?? '80,90,pace,summary';
+const ALERTS = process.env.REPORT_ALERTS ?? '80,90,pace,summary,stale';
 const CHECK_MS = 30_000;
 const ALERT_CHECK_MS = 5 * 60_000;
 const DAY_MS = 86_400_000;
@@ -144,7 +144,8 @@ async function people() {
 async function checkAlerts(hooks, rules, state) {
   const now = Date.now();
   const alerts = { ...state.alerts };
-  for (const account of accountsFrom(await people())) {
+  const members = await people();
+  for (const account of accountsFrom(members)) {
     const { state: next, text, summary } = check(account, now, rules, alerts[account.key]);
     alerts[account.key] = next;
     if (text) {
@@ -163,6 +164,16 @@ async function checkAlerts(hooks, rules, state) {
     }
   }
   state.alerts = alerts;
+  if (rules.stale) {
+    const stale = staleMembers(members, now, state.stale);
+    for (const member of stale.alerts) {
+      const last = localNow(new Date(member.syncedAt), TIME_ZONE);
+      const text = `${member.name}'s Claude Usage Monitor has not synced for ${member.hours}h (last ${last.day} ${last.time}). Check that the app is running.`;
+      log(`alert: ${text}`);
+      await notify(hooks, text);
+    }
+    state.stale = stale.state;
+  }
   await saveState(state);
 }
 

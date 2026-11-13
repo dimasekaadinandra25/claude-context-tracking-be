@@ -80,7 +80,7 @@ services:
       REPORT_MESSAGE: ${REPORT_MESSAGE:-Claude usage report {date}}
       REPORT_EMAIL: ${REPORT_EMAIL:-}
       REPORT_PASSWORD: ${REPORT_PASSWORD:-}
-      REPORT_ALERTS: ${REPORT_ALERTS-80,90,pace,summary}
+      REPORT_ALERTS: ${REPORT_ALERTS-80,90,pace,summary,stale}
     volumes:
       - reporter-state:/state
     shm_size: 1gb
