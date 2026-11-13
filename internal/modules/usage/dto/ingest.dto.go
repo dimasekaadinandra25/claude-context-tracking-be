@@ -57,10 +57,11 @@ type HourPayload struct {
 }
 
 type IngestResponse struct {
-	Accepted         int         `json:"accepted"`
-	Rejected         []Rejection `json:"rejected"`
-	LatestAppVersion string      `json:"latest_app_version,omitempty"`
-	CostPerMillion   float64     `json:"cost_per_million_tokens,omitempty"`
+	Accepted          int         `json:"accepted"`
+	Rejected          []Rejection `json:"rejected"`
+	LatestAppVersion  string      `json:"latest_app_version,omitempty"`
+	CostPerMillion    float64     `json:"cost_per_million_tokens,omitempty"`
+	PercentPerMillion float64     `json:"percent_per_million_tokens,omitempty"`
 }
 
 type Rejection struct {

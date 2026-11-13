@@ -13,6 +13,15 @@ import (
 
 var ErrNoSession = errors.New("session not found")
 
+const hourWeight = `(h.input_tokens + h.cache_write_tokens + h.cache_read_tokens + 5 * (h.output_tokens + h.subagent_output_tokens))`
+
+const accounts = `
+	SELECT u.id AS user_id, COALESCE(NULLIF(u.full_name, ''), u.username) AS name,
+	       NULLIF(ca.email, '') AS email, NULLIF(ca.tier, '') AS tier,
+	       COALESCE(NULLIF(LOWER(ca.email), ''), u.id::text) AS account
+	FROM core.users u LEFT JOIN usage.claude_accounts ca ON ca.user_id = u.id
+	WHERE u.deleted_at IS NULL`
+
 const nearFull = `s.context_window > 0 AND s.peak_context >= 0.8 * s.context_window`
 
 const overheadJSON = `CASE WHEN s.overhead_system_tokens IS NULL THEN NULL ELSE json_build_object(
@@ -125,7 +134,7 @@ func (r *Repository) Overview(ctx context.Context, q dto.ReportQuery) ([]dto.Per
 		           FROM jsonb_array_elements(pl.model_limits) m
 		           WHERE to_timestamp((m->>'resets_at')::bigint) > NOW()), '[]'::jsonb),
 		       NULLIF(ca.email, ''), NULLIF(ca.plan, ''), NULLIF(ca.tier, ''),
-		       ls.last_request_at, k.last_used_at, k.app_version, COALESCE(u.is_active, FALSE)
+		       ls.last_request_at, k.last_used_at, k.app_version, COALESCE(u.is_active, FALSE), fh.share
 		FROM core.users u
 		LEFT JOIN h ON h.user_id = u.id
 		LEFT JOIN st ON st.user_id = u.id
@@ -138,6 +147,15 @@ func (r *Repository) Overview(ctx context.Context, q dto.ReportQuery) ([]dto.Per
 			ORDER BY p.captured_at DESC
 			LIMIT 1
 		) pl ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT (pl.five_hour_used * COALESCE(SUM(`+hourWeight+`) FILTER (WHERE h.user_id = u.id), 0)
+			        / NULLIF(SUM(`+hourWeight+`), 0))::float8 AS share
+			FROM usage.session_hours h
+			LEFT JOIN usage.claude_accounts ha ON ha.user_id = h.user_id
+			WHERE pl.five_hour_resets_at > NOW()
+			  AND h.hour >= date_trunc('hour', pl.five_hour_resets_at - INTERVAL '5 hours')
+			  AND (h.user_id = u.id OR (ca.email <> '' AND LOWER(ha.email) = LOWER(ca.email)))
+		) fh ON TRUE
 		LEFT JOIN LATERAL (
 			SELECT s.model, s.last_request_at FROM usage.sessions s
 			WHERE s.user_id = u.id ORDER BY s.last_request_at DESC LIMIT 1
@@ -161,7 +179,7 @@ func (r *Repository) Overview(ctx context.Context, q dto.ReportQuery) ([]dto.Per
 			&p.LinesAdded, &p.LinesRemoved, &p.Commits,
 			&p.FiveHourUsed, &p.FiveHourResetsAt, &p.SevenDayUsed, &p.SevenDayResetsAt, &p.LimitsCapturedAt, &p.ModelLimits,
 			&p.ClaudeEmail, &p.ClaudePlan, &p.ClaudeTier,
-			&p.LastRequestAt, &p.LastSyncedAt, &p.AppVersion, &p.IsActive)
+			&p.LastRequestAt, &p.LastSyncedAt, &p.AppVersion, &p.IsActive, &p.FiveHourShare)
 		return p, err
 	})
 }
@@ -518,6 +536,79 @@ func (r *Repository) Projects(ctx context.Context, q dto.ReportQuery) ([]dto.Pro
 		err := row.Scan(&p.Project, &p.NewContext, &p.Requests, &p.OutputTokens, &p.InputTokens, &p.CacheWriteTokens, &p.CacheReadTokens,
 			&p.Sessions, &p.Members, &p.Models, &p.Compactions, &p.SessionsNearFull, &p.Overhead)
 		return p, err
+	})
+}
+
+func (r *Repository) HotSessions(ctx context.Context, minShare float64, userID string) ([]dto.HotSession, error) {
+	rows, err := r.db.Query(ctx, `
+		WITH a AS (`+accounts+`
+		), lim AS (
+			SELECT DISTINCT ON (a.account) a.account, p.seven_day_used AS used, p.seven_day_resets_at AS resets_at
+			FROM usage.plan_limits p JOIN a ON a.user_id = p.user_id
+			WHERE p.seven_day_resets_at > NOW() AND p.seven_day_used IS NOT NULL
+			ORDER BY a.account, p.captured_at DESC
+		), wk AS (
+			SELECT a.account, SUM(`+hourWeight+`)::bigint AS weight
+			FROM usage.session_hours h JOIN a ON a.user_id = h.user_id JOIN lim ON lim.account = a.account
+			WHERE h.hour >= lim.resets_at - INTERVAL '7 days'
+			GROUP BY a.account
+		), hot AS (
+			SELECT h.session_id, h.user_id, h.hour, SUM(`+hourWeight+`)::bigint AS weight
+			FROM usage.session_hours h
+			WHERE h.hour >= date_trunc('hour', NOW()) - INTERVAL '1 hour' AND ($2::uuid IS NULL OR h.user_id = $2::uuid)
+			GROUP BY h.session_id, h.user_id, h.hour
+		)
+		SELECT s.id, a.user_id::text, a.name, s.project, s.title, hot.hour, hot.weight,
+		       (lim.used * hot.weight / wk.weight)::float8 AS share
+		FROM hot
+		JOIN usage.sessions s ON s.id = hot.session_id
+		JOIN a ON a.user_id = hot.user_id
+		JOIN lim ON lim.account = a.account
+		JOIN wk ON wk.account = a.account
+		WHERE wk.weight > 0 AND lim.used * hot.weight / wk.weight >= $1
+		ORDER BY share DESC, s.id`, minShare, userFilter(userID))
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (dto.HotSession, error) {
+		var h dto.HotSession
+		err := row.Scan(&h.SessionID, &h.UserID, &h.FullName, &h.Project, &h.Title, &h.Hour, &h.Weight, &h.Share)
+		return h, err
+	})
+}
+
+func (r *Repository) Costs(ctx context.Context, q dto.ReportQuery) ([]dto.CostRow, error) {
+	rows, err := r.db.Query(ctx, `
+		WITH a AS (`+accounts+`
+		), used AS (
+			SELECT h.user_id, s.project,
+			       SUM(h.input_tokens)::bigint AS input_tokens, SUM(h.cache_write_tokens)::bigint AS cache_write_tokens,
+			       SUM(h.cache_read_tokens)::bigint AS cache_read_tokens,
+			       SUM(h.output_tokens + h.subagent_output_tokens)::bigint AS output_tokens,
+			       SUM(h.requests)::bigint AS requests, SUM(`+hourWeight+`)::bigint AS weight
+			FROM usage.session_hours h JOIN usage.sessions s ON s.id = h.session_id
+			WHERE h.hour >= $1 AND h.hour < $2
+			GROUP BY h.user_id, s.project
+		), priced AS (
+			SELECT a.user_id, a.name, a.email, used.project, used.input_tokens, used.cache_write_tokens,
+			       used.cache_read_tokens, used.output_tokens, used.requests, used.weight,
+			       MAX(a.tier) OVER (PARTITION BY a.account) AS tier,
+			       SUM(used.weight) OVER (PARTITION BY a.account)::bigint AS account_weight
+			FROM used JOIN a ON a.user_id = used.user_id
+		)
+		SELECT user_id::text, name, email, tier, project, input_tokens, cache_write_tokens, cache_read_tokens,
+		       output_tokens, requests, weight, account_weight
+		FROM priced
+		WHERE $3::uuid IS NULL OR user_id = $3::uuid
+		ORDER BY name, weight DESC, project`, q.From, q.To, userFilter(q.UserID))
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (dto.CostRow, error) {
+		var c dto.CostRow
+		err := row.Scan(&c.UserID, &c.FullName, &c.ClaudeEmail, &c.ClaudeTier, &c.Project, &c.InputTokens, &c.CacheWriteTokens,
+			&c.CacheReadTokens, &c.OutputTokens, &c.Requests, &c.Weight, &c.AccountWeight)
+		return c, err
 	})
 }
 

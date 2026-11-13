@@ -203,7 +203,7 @@ The body may be at most 64 MB.
 - `api_keys.last_used_at` is updated on every call. Reports show it as `last_synced_at`.
 - `api_keys.app_version` is set from a valid `X-App-Version` header after the batch is saved. A call without the header leaves it unchanged. Reports show it as `app_version`.
 - When the call sends `X-App-Version`, `latest_app_version` is the newest version any active API key has reported, compared number by number (`0.10.0` is newer than `0.9.1`). The app shows an update notice when it is newer than its own.
-- When the call sends `X-App-Version`, `cost_per_million_tokens` is this week's plan cost per million weighted tokens (input including cache + 5 × output including subagents) for the caller's Claude account: the latest 7-day `used` % × the weekly allowance of the account's tier ($200, $100 or $20 per month × 12 / 52) divided by every member's weighted tokens since the window started. It is left out when the account has no live reading, an unknown tier or no tokens.
+- When the call sends `X-App-Version`, `cost_per_million_tokens` is this week's plan cost per million weighted tokens (input including cache + 5 × output including subagents) for the caller's Claude account: the latest 7-day `used` % × the weekly allowance of the account's tier ($200, $100 or $20 per month × 12 / 52) divided by every member's weighted tokens since the window started. It is left out when the account has no live reading, an unknown tier or no tokens. `percent_per_million_tokens` is the same week as points of the 7-day limit per million weighted tokens (`used` % divided by the account's weighted tokens × 1,000,000); the app multiplies a session's weighted tokens in one hour by it to warn about runaway sessions.
 
 **Response (200):**
 ```json
@@ -212,7 +212,8 @@ The body may be at most 64 MB.
     "accepted": 1,
     "rejected": [],
     "latest_app_version": "0.3.0",
-    "cost_per_million_tokens": 0.031
+    "cost_per_million_tokens": 0.031,
+    "percent_per_million_tokens": 0.034
   },
   "message": "Usage saved"
 }
@@ -355,7 +356,7 @@ A member gets a single entry: themselves.
 
 ---
 
-Overview rows also carry `lines_added`, `lines_removed` and `commits` in the range (totals `total_lines_added`, `total_lines_removed`, `total_commits`), and the member's latest plan limits regardless of range: `five_hour_used`, `five_hour_resets_at`, `seven_day_used`, `seven_day_resets_at` (each `null` when never sent or once the window has reset) and `limits_captured_at`, `model_limits` (the single-model weekly limits of that reading as `{ "name", "used", "resets_at" }`, expired ones left out, `[]` when none), plus the Claude account last sent: `claude_email`, `claude_plan`, `claude_tier` (`null` when never sent).
+Overview rows also carry `lines_added`, `lines_removed` and `commits` in the range (totals `total_lines_added`, `total_lines_removed`, `total_commits`), and the member's latest plan limits regardless of range: `five_hour_used`, `five_hour_resets_at`, `seven_day_used`, `seven_day_resets_at` (each `null` when never sent or once the window has reset) and `limits_captured_at`, `model_limits` (the single-model weekly limits of that reading as `{ "name", "used", "resets_at" }`, expired ones left out, `[]` when none), plus the Claude account last sent: `claude_email`, `claude_plan`, `claude_tier` (`null` when never sent). `five_hour_share` is how many points of the account's live 5-hour window this member used: `five_hour_used` × the member's weighted tokens since the window started ÷ every account member's weighted tokens in that time (`null` without a live window).
 
 ### 3. Timeseries
 
@@ -582,6 +583,39 @@ Takes the report parameters. Returns usage per member and model in the range, or
 Members only see their own rows.
 
 ---
+
+### 25. Hot Sessions
+
+```
+GET /usage/v1/hot-sessions?min_share=5
+```
+
+Sessions that used at least `min_share` percent (default 5, between 0 and 100) of their Claude account's weekly limit within one clock hour, for the current and the previous hour. The share is the session's weighted tokens in that hour × the account's latest live 7-day `used` % ÷ every member's weighted tokens since the window started. Members only see their own sessions.
+
+```json
+{
+  "data": [
+    {
+      "session_id": "a1b2",
+      "user_id": "6f1c...",
+      "full_name": "Dummy 1",
+      "project": "api",
+      "title": "Fix login",
+      "hour": "2026-11-13T07:00:00Z",
+      "weight": 3000000,
+      "share": 6.2
+    }
+  ]
+}
+```
+
+### 26. Costs
+
+```
+GET /usage/v1/costs?from=2026-11-01T00:00:00+07:00&to=2026-12-01T00:00:00+07:00&tz=Asia/Jakarta
+```
+
+One row per member and project in the range with `input_tokens`, `cache_write_tokens`, `cache_read_tokens`, `output_tokens` (including subagents), `requests`, `weight` and `cost`. `cost` splits the account's monthly plan price ($200, $100 or $20 by tier) by each row's share of every account member's weighted tokens in the range, so a calendar month adds up to the plan price. `claude_email` and `claude_tier` are the member's Claude account (`null` when never sent). Members only get their own rows; the split still uses the whole account.
 
 ### 5. Session List
 

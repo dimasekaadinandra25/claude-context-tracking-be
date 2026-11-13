@@ -48,7 +48,7 @@ func (h *Handler) Ingest(c *gin.Context) {
 		res.LatestAppVersion, err = h.service.LatestAppVersion(c.Request.Context())
 	}
 	if err == nil && version != "" {
-		res.CostPerMillion, err = h.service.CostPerMillion(c.Request.Context(), middleware.MustGetUserID(c))
+		res.CostPerMillion, res.PercentPerMillion, err = h.service.WeekRates(c.Request.Context(), middleware.MustGetUserID(c))
 	}
 	if err != nil {
 		logger.Error("Failed to save usage", logger.Err(err))
@@ -189,6 +189,32 @@ func (h *Handler) Models(c *gin.Context) {
 		return
 	}
 	response.Success(c, http.StatusOK, "Models retrieved", res)
+}
+
+func (h *Handler) HotSessions(c *gin.Context) {
+	who, q, ok := reportRequest[dto.HotQuery](c)
+	if !ok {
+		return
+	}
+	res, err := h.service.HotSessions(c.Request.Context(), who, q.MinShare)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	response.Success(c, http.StatusOK, "Hot sessions retrieved", res)
+}
+
+func (h *Handler) Costs(c *gin.Context) {
+	who, q, ok := reportRequest[dto.ReportQuery](c)
+	if !ok {
+		return
+	}
+	res, err := h.service.Costs(c.Request.Context(), who, q)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	response.Success(c, http.StatusOK, "Costs retrieved", res)
 }
 
 func (h *Handler) Projects(c *gin.Context) {

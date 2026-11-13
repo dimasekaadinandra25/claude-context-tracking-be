@@ -1,7 +1,18 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
-import { accountsFrom, check, dailySummary, lastWeekUsed, rulesFrom, staleMembers, summarySent } from './alerts.mjs';
+import {
+  accountsFrom,
+  anyRule,
+  check,
+  dailySummary,
+  lastWeekUsed,
+  projectShares,
+  rulesFrom,
+  runawaySessions,
+  staleMembers,
+  summarySent,
+} from './alerts.mjs';
 import { dueDay, hooksFrom, localNow, redact, requestFor, textRequestFor } from './hooks.mjs';
 
 const env = (name, fallback) => process.env[name]?.trim() || fallback;
@@ -18,7 +29,9 @@ const LANGUAGE = env('REPORT_LANG', 'en');
 const LINK = env('REPORT_LINK', '');
 const MESSAGE = env('REPORT_MESSAGE', 'Claude usage report {date}');
 const STATE_FILE = env('REPORT_STATE_FILE', '/state/reporter.json');
-const ALERTS = process.env.REPORT_ALERTS ?? '80,90,pace,summary,stale';
+const ALERTS = process.env.REPORT_ALERTS ?? '80,90,pace,summary,stale,runaway,project';
+const RUNAWAY_SHARE = Number(env('REPORT_RUNAWAY_SHARE', '5'));
+const PROJECT_SHARE = Number(env('REPORT_PROJECT_SHARE', '40'));
 const CHECK_MS = 30_000;
 const ALERT_CHECK_MS = 5 * 60_000;
 const DAY_MS = 86_400_000;
@@ -128,14 +141,9 @@ async function report(hooks, day, title = MESSAGE.replace('{date}', day)) {
 
 const notify = (hooks, text) => send(hooks, (hook) => textRequestFor(hook, text));
 
-async function lastDay(paths, daysAgo = 0) {
+async function get(paths, query) {
   const session = await signIn();
-  const to = new Date(Date.now() - daysAgo * DAY_MS);
-  const params = new URLSearchParams({
-    from: new Date(to.getTime() - DAY_MS).toISOString(),
-    to: to.toISOString(),
-    tz: TIME_ZONE,
-  });
+  const params = new URLSearchParams(query);
   return Promise.all(
     paths.map(async (path) => {
       const res = await fetch(`${API_URL}${path}?${params}`, {
@@ -145,6 +153,41 @@ async function lastDay(paths, daysAgo = 0) {
       return (await res.json()).data;
     })
   );
+}
+
+function lastDay(paths, daysAgo = 0) {
+  const to = new Date(Date.now() - daysAgo * DAY_MS);
+  return get(paths, { from: new Date(to.getTime() - DAY_MS).toISOString(), to: to.toISOString(), tz: TIME_ZONE });
+}
+
+async function alertAll(hooks, texts) {
+  for (const text of texts) {
+    log(`alert: ${text}`);
+    await notify(hooks, text);
+  }
+}
+
+async function checkRunaway(hooks, state, now) {
+  const [hot] = await get(['/usage/v1/hot-sessions'], { min_share: String(RUNAWAY_SHARE) });
+  const result = runawaySessions(hot, now, state.runaway);
+  await alertAll(hooks, result.alerts);
+  state.runaway = result.state;
+}
+
+async function checkProjects(hooks, state, members, now) {
+  const windows = accountsFrom(members)
+    .filter((account) => account.weekly)
+    .map((account) => account.resetsAt);
+  if (windows.length === 0) return;
+  const window = Math.min(...windows);
+  const [projects] = await get(['/usage/v1/projects'], {
+    from: new Date(window - 7 * DAY_MS).toISOString(),
+    to: new Date(now).toISOString(),
+    tz: TIME_ZONE,
+  });
+  const result = projectShares(projects, PROJECT_SHARE, window, now, state.projects);
+  await alertAll(hooks, result.alerts);
+  state.projects = result.state;
 }
 
 async function people() {
@@ -199,6 +242,10 @@ async function checkAlerts(hooks, rules, state) {
       await notify(hooks, text);
     }
     state.stale = stale.state;
+  }
+  if (rules.runaway) await checkRunaway(hooks, state, now).catch((error) => log(`runaway check failed: ${error.message}`));
+  if (rules.project) {
+    await checkProjects(hooks, state, members, now).catch((error) => log(`project check failed: ${error.message}`));
   }
   await saveState(state);
 }
@@ -258,7 +305,7 @@ async function main() {
     }
   }, CHECK_MS);
 
-  if (rules.thresholds.length === 0 && !rules.pace) return;
+  if (!anyRule(rules)) return;
   log(`checking limits every ${ALERT_CHECK_MS / 60_000} min for ${ALERTS}`);
   const alertTick = () =>
     checkAlerts(hooks, rules, state).catch((error) => log(`limit check failed: ${error.message}`));

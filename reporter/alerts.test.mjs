@@ -1,7 +1,18 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { accountsFrom, check, dailySummary, lastWeekUsed, rulesFrom, staleMembers, summarySent } from './alerts.mjs';
+import {
+  accountsFrom,
+  anyRule,
+  check,
+  dailySummary,
+  lastWeekUsed,
+  projectShares,
+  rulesFrom,
+  runawaySessions,
+  staleMembers,
+  summarySent,
+} from './alerts.mjs';
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -19,8 +30,17 @@ const person = (fields) => ({
 });
 
 test('reads thresholds and pace', () => {
-  assert.deepEqual(rulesFrom('90,80,pace,abc,0,120,summary,stale'), { thresholds: [80, 90], pace: true, summary: true, stale: true });
-  assert.deepEqual(rulesFrom(''), { thresholds: [], pace: false, summary: false, stale: false });
+  assert.deepEqual(rulesFrom('90,80,pace,abc,0,120,summary,stale,runaway,project'), {
+    thresholds: [80, 90],
+    pace: true,
+    summary: true,
+    stale: true,
+    runaway: true,
+    project: true,
+  });
+  const none = rulesFrom('');
+  assert.equal(anyRule(none), false);
+  assert.equal(anyRule(rulesFrom('stale')), true);
 });
 
 test('groups members of one claude account and skips inactive or unknown ones', () => {
@@ -138,4 +158,39 @@ test('daily message compares with the same day last week and links the dashboard
     text,
     'Weekly limit 50% used · budget 16.7%/day for 3.0 days · on pace for 88% at reset · last week by Fri 6: 45%\nhttps://usage.example.com/dashboard/overview'
   );
+});
+
+test('a runaway session is reported once per hour and forgotten after a day', () => {
+  const hour = new Date(now - HOUR).toISOString();
+  const hot = [{ session_id: 's1', full_name: 'Dummy 1', title: 'Fix login', project: 'api', hour, share: 6.24 }];
+  const first = runawaySessions(hot, now, undefined);
+  assert.deepEqual(first.alerts, [
+    `Runaway session: Dummy 1's "Fix login in api" used 6.2% of the weekly limit within one hour.`,
+  ]);
+  assert.deepEqual(runawaySessions(hot, now, first.state).alerts, []);
+  assert.deepEqual(runawaySessions([], now + 2 * DAY, first.state).state, {});
+});
+
+test('a project passing the share of the week is reported once per window, not on the first day', () => {
+  const project = (name, input) => ({ project: name, input_tokens: input, cache_write_tokens: 0, cache_read_tokens: 0, output_tokens: 0 });
+  const projects = [project('api', 450), project('web', 400), project('', 150)];
+  const window = now + 3 * DAY;
+  const first = projectShares(projects, 40, window, now, undefined);
+  assert.deepEqual(first.alerts, [
+    `Project api has used 45% of the team's Claude tokens this week (alert at 40%).`,
+    `Project web has used 40% of the team's Claude tokens this week (alert at 40%).`,
+  ]);
+  assert.deepEqual(projectShares(projects, 40, window, now, first.state).alerts, []);
+  assert.equal(projectShares(projects, 40, now + 5 * DAY, now, first.state).alerts.length, 2);
+  assert.deepEqual(projectShares(projects, 40, now + 6.5 * DAY, now, undefined).alerts, []);
+});
+
+test('daily message shows the 5-hour window with each member share and who is active now', () => {
+  const people = [
+    person({ user_id: 'a', full_name: 'Dummy 1', five_hour_used: 34, five_hour_share: 22.4, last_request_at: new Date(now - 60_000).toISOString() }),
+    person({ user_id: 'b', full_name: 'Dummy 2', five_hour_used: 34, five_hour_share: 11.6, last_request_at: new Date(now - HOUR).toISOString() }),
+    person({ user_id: 'c', full_name: 'Dummy 3', five_hour_used: 34, five_hour_share: 0, last_request_at: null }),
+  ];
+  const lines = dailySummary(people, [], now).split(String.fromCharCode(10));
+  assert.equal(lines[1], '5-hour window 34% used: Dummy 1 22% (active now), Dummy 2 12%');
 });

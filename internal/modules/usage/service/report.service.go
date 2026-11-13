@@ -156,6 +156,44 @@ func (s *Service) MemberModels(ctx context.Context, c dto.Caller, q dto.ReportQu
 	return s.repo.MemberModels(ctx, q)
 }
 
+const (
+	defaultHotShare = 5
+	maxShare        = 100
+)
+
+func (s *Service) HotSessions(ctx context.Context, c dto.Caller, minShare float64) ([]dto.HotSession, error) {
+	if minShare == 0 {
+		minShare = defaultHotShare
+	}
+	if minShare < 0 || minShare > maxShare {
+		return nil, fmt.Errorf("%w: min_share must be between 0 and 100", ErrInvalidInput)
+	}
+	return s.repo.HotSessions(ctx, minShare, s.scope(c, ""))
+}
+
+func (s *Service) Costs(ctx context.Context, c dto.Caller, q dto.ReportQuery) ([]dto.CostRow, error) {
+	q, _, err := s.prepare(c, q)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.repo.Costs(ctx, q)
+	for i := range rows {
+		rows[i].Cost = splitCost(rows[i])
+	}
+	return rows, err
+}
+
+func splitCost(row dto.CostRow) float64 {
+	if row.ClaudeTier == nil || row.AccountWeight <= 0 {
+		return 0
+	}
+	price, ok := planPrice(*row.ClaudeTier)
+	if !ok {
+		return 0
+	}
+	return price * float64(row.Weight) / float64(row.AccountWeight)
+}
+
 func (s *Service) Projects(ctx context.Context, c dto.Caller, q dto.ReportQuery) ([]dto.ProjectSummary, error) {
 	q, _, err := s.prepare(c, q)
 	if err != nil {

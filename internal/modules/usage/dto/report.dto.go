@@ -55,6 +55,7 @@ type PersonSummary struct {
 	LastSyncedAt         *time.Time   `json:"last_synced_at"`
 	AppVersion           *string      `json:"app_version"`
 	IsActive             bool         `json:"is_active"`
+	FiveHourShare        *float64     `json:"five_hour_share"`
 }
 
 type Overview struct {
@@ -195,6 +196,37 @@ type SessionDetail struct {
 	Hours    []domain.HourUsage `json:"hours"`
 	Overhead *domain.Overhead   `json:"overhead"`
 	Tools    []ToolSummary      `json:"tools"`
+}
+
+type HotQuery struct {
+	MinShare float64 `form:"min_share"`
+}
+
+type HotSession struct {
+	SessionID string    `json:"session_id"`
+	UserID    string    `json:"user_id"`
+	FullName  string    `json:"full_name"`
+	Project   string    `json:"project"`
+	Title     string    `json:"title"`
+	Hour      time.Time `json:"hour"`
+	Weight    int64     `json:"weight"`
+	Share     float64   `json:"share"`
+}
+
+type CostRow struct {
+	UserID           string  `json:"user_id"`
+	FullName         string  `json:"full_name"`
+	ClaudeEmail      *string `json:"claude_email"`
+	ClaudeTier       *string `json:"claude_tier"`
+	Project          string  `json:"project"`
+	InputTokens      int64   `json:"input_tokens"`
+	CacheWriteTokens int64   `json:"cache_write_tokens"`
+	CacheReadTokens  int64   `json:"cache_read_tokens"`
+	OutputTokens     int64   `json:"output_tokens"`
+	Requests         int64   `json:"requests"`
+	Weight           int64   `json:"weight"`
+	AccountWeight    int64   `json:"-"`
+	Cost             float64 `json:"cost"`
 }
 
 type ProjectSummary struct {

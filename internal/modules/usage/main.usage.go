@@ -31,6 +31,8 @@ func (m *Module) SetupRoutes(rg *gin.RouterGroup) {
 	rg.GET("/daily", m.Handler.Daily)
 	rg.GET("/weeks", m.Handler.Weeks)
 	rg.GET("/projects", m.Handler.Projects)
+	rg.GET("/hot-sessions", m.Handler.HotSessions)
+	rg.GET("/costs", m.Handler.Costs)
 	rg.GET("/sessions", m.Handler.Sessions)
 	rg.GET("/sessions/:id", m.Handler.Session)
 	rg.GET("/people", m.Handler.People)
