@@ -85,7 +85,7 @@ services:
       REPORT_MESSAGE: ${REPORT_MESSAGE:-Claude usage report {date}}
       REPORT_EMAIL: ${REPORT_EMAIL:-}
       REPORT_PASSWORD: ${REPORT_PASSWORD:-}
-      REPORT_ALERTS: ${REPORT_ALERTS-80,90,pace,summary,stale,runaway,project}
+      REPORT_ALERTS: ${REPORT_ALERTS-80,90,pace,summary,stale,runaway,project,budget,version}
       REPORT_RUNAWAY_SHARE: ${REPORT_RUNAWAY_SHARE:-5}
       REPORT_PROJECT_SHARE: ${REPORT_PROJECT_SHARE:-40}
     volumes:

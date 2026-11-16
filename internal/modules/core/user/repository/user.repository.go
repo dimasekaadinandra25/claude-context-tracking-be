@@ -406,20 +406,21 @@ func (r *UserRepository) UpdateLastLogin(ctx context.Context, id string) error {
 }
 
 // IncrementFailedLogin increments failed login count
-func (r *UserRepository) IncrementFailedLogin(ctx context.Context, id string) error {
+func (r *UserRepository) IncrementFailedLogin(ctx context.Context, id string) (int, error) {
 	query := `
 		UPDATE core.users
 		SET failed_login_count = failed_login_count + 1
 		WHERE id = $1 AND deleted_at IS NULL
+		RETURNING failed_login_count
 	`
 
-	_, err := r.db.Exec(ctx, query, id)
-	if err != nil {
+	var count int
+	if err := r.db.QueryRow(ctx, query, id).Scan(&count); err != nil {
 		logger.Error("Failed to increment failed login count", logger.Err(err))
-		return err
+		return 0, err
 	}
 
-	return nil
+	return count, nil
 }
 
 // LockUser locks a user account

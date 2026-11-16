@@ -7,6 +7,8 @@ import {
   check,
   dailySummary,
   lastWeekUsed,
+  memberBudgets,
+  outdatedMembers,
   projectShares,
   rulesFrom,
   runawaySessions,
@@ -30,13 +32,15 @@ const person = (fields) => ({
 });
 
 test('reads thresholds and pace', () => {
-  assert.deepEqual(rulesFrom('90,80,pace,abc,0,120,summary,stale,runaway,project'), {
+  assert.deepEqual(rulesFrom('90,80,pace,abc,0,120,summary,stale,runaway,project,budget,version'), {
     thresholds: [80, 90],
     pace: true,
     summary: true,
     stale: true,
     runaway: true,
     project: true,
+    budget: true,
+    version: true,
   });
   const none = rulesFrom('');
   assert.equal(anyRule(none), false);
@@ -77,7 +81,7 @@ test('warns when the week is on pace to run out', () => {
   assert.equal(check(slow, now, rules, undefined).text, null);
 });
 
-test('single-model limits such as Fable alert on their own, without pace or summary', () => {
+test('single-model limits such as Fable alert on their own and on pace, without a summary', () => {
   const resets = new Date(now + 2 * DAY).toISOString();
   const accounts = accountsFrom([
     person({ seven_day_used: 30, model_limits: [{ name: 'Fable', used: 85, resets_at: resets }] }),
@@ -89,6 +93,8 @@ test('single-model limits such as Fable alert on their own, without pace or summ
   assert.equal(check(accounts[1], now, rules, fable.state).text, null);
   const [, quiet] = accountsFrom([person({ model_limits: [{ name: 'Fable', used: 10, resets_at: resets }] })]);
   assert.equal(check(quiet, now + 6.5 * DAY, rules, undefined).text, null);
+  const [, fast] = accountsFrom([person({ model_limits: [{ name: 'Fable', used: 50, resets_at: new Date(now + 4 * DAY).toISOString() }] })]);
+  assert.match(check(fast, now, rules, undefined).text, /^Claude Fable weekly limit is on pace to run out/);
 });
 
 test('weekly summary is due once in the last hour before the reset', () => {
@@ -164,13 +170,13 @@ test('a runaway session is reported once per hour and forgotten after a day', ()
   const hour = new Date(now - HOUR).toISOString();
   const hot = [{ session_id: 's1', full_name: 'Dummy 1', title: 'Fix login', project: 'api', hour, share: 6.24 }];
   const first = runawaySessions(hot, now, undefined);
-  assert.deepEqual(first.alerts, [
+  assert.deepEqual(first.alerts.map((alert) => alert.text), [
     `Runaway session: Dummy 1's "Fix login in api" used 6.2% of the weekly limit within one hour.`,
   ]);
   assert.deepEqual(runawaySessions(hot, now, first.state).alerts, []);
   assert.deepEqual(runawaySessions([], now + 2 * DAY, first.state).state, {});
   const linked = runawaySessions(hot, now, undefined, 'https://usage.example.com');
-  assert.match(linked.alerts[0], /within one hour\.\nhttps:\/\/usage\.example\.com\/dashboard\/sessions\/s1$/);
+  assert.match(linked.alerts[0].text, /within one hour\.\nhttps:\/\/usage\.example\.com\/dashboard\/sessions\/s1$/);
 });
 
 test('a project passing the share of the week is reported once per window, not on the first day', () => {
@@ -178,7 +184,7 @@ test('a project passing the share of the week is reported once per window, not o
   const projects = [project('api', 450), project('web', 400), project('', 150), project('idle', 0)];
   const window = now + 3 * DAY;
   const first = projectShares(projects, 40, window, now, undefined);
-  assert.deepEqual(first.alerts, [
+  assert.deepEqual(first.alerts.map((alert) => alert.text), [
     `Project api has used 45% of the team's Claude tokens this week (alert at 40%).`,
     `Project web has used 40% of the team's Claude tokens this week (alert at 40%).`,
   ]);
@@ -187,7 +193,7 @@ test('a project passing the share of the week is reported once per window, not o
   assert.deepEqual(projectShares(projects, 40, now + 6.5 * DAY, now, undefined).alerts, []);
   assert.deepEqual(projectShares(projects.slice(0, 2), 40, window, now, undefined).alerts, []);
   const linked = projectShares(projects, 40, window, now, undefined, 'https://usage.example.com');
-  assert.match(linked.alerts[0], /\nhttps:\/\/usage\.example\.com\/dashboard\/sessions\?project=api$/);
+  assert.match(linked.alerts[0].text, /\nhttps:\/\/usage\.example\.com\/dashboard\/sessions\?project=api$/);
 });
 
 test('daily message shows the 5-hour window with each member share and who is active now', () => {
@@ -198,4 +204,49 @@ test('daily message shows the 5-hour window with each member share and who is ac
   ];
   const lines = dailySummary(people, [], now).split(String.fromCharCode(10));
   assert.equal(lines[1], '5-hour window 34% used: Dummy 1 22% (active now), Dummy 2 12%');
+});
+
+test('a member over their fair share of the day is reported once per day', () => {
+  const people = [
+    person({ user_id: 'a', full_name: 'Dummy 1' }),
+    person({ user_id: 'b', full_name: 'Dummy 2' }),
+    person({ user_id: 'c', full_name: 'Gone', is_active: false }),
+  ];
+  const row = (user_id, input, day = '2026-11-13') => ({
+    user_id,
+    day,
+    input_tokens: input,
+    cache_write_tokens: 0,
+    cache_read_tokens: 0,
+    output_tokens: 0,
+    limit_used: 20,
+    account_weight: 1000,
+    account_members: 2,
+  });
+  const daily = [row('a', 600), row('b', 300), row('c', 100), row('a', 900, '2026-11-12')];
+  const first = memberBudgets(people, daily, '2026-11-13', undefined);
+  assert.deepEqual(
+    first.alerts.map((alert) => alert.text),
+    ['Dummy 1 used 12.0% of the shared weekly limit today, over their fair share of 7.1% (14.3%/day split between 2 members).']
+  );
+  assert.deepEqual(memberBudgets(people, daily, '2026-11-13', first.state).alerts, []);
+  assert.equal(memberBudgets(people, daily, '2026-11-12', first.state).alerts.length, 1);
+  const alone = daily.map((r) => ({ ...r, account_members: 1 }));
+  assert.deepEqual(memberBudgets(people, alone, '2026-11-13', undefined).alerts, []);
+});
+
+test('members on an older app version are reported once per new version', () => {
+  const people = [
+    person({ user_id: 'a', full_name: 'Dummy 1', app_version: '0.3.10' }),
+    person({ user_id: 'b', full_name: 'Dummy 2', app_version: '0.3.9' }),
+    person({ user_id: 'c', full_name: 'Dummy 3', app_version: null }),
+  ];
+  const first = outdatedMembers(people, undefined);
+  assert.deepEqual(
+    first.alerts.map((alert) => alert.text),
+    ['Dummy 2 runs Claude Usage Monitor 0.3.9; 0.3.10 is out. Click "v0.3.10 available" in the app\'s bottom bar to update.']
+  );
+  assert.deepEqual(outdatedMembers(people, first.state).alerts, []);
+  people[1].app_version = '0.3.10';
+  assert.deepEqual(outdatedMembers(people, first.state), { state: {}, alerts: [] });
 });

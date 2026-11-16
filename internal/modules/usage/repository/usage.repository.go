@@ -77,7 +77,7 @@ const upsertPlanLimits = `
 		seven_day_used = EXCLUDED.seven_day_used,
 		seven_day_resets_at = EXCLUDED.seven_day_resets_at,
 		captured_at = EXCLUDED.captured_at
-	WHERE EXCLUDED.captured_at >= usage.plan_limits.captured_at`
+	WHERE EXCLUDED.captured_at >= usage.plan_limits.captured_at OR usage.plan_limits.captured_at > NOW()`
 
 const insertPlanReading = `
 	INSERT INTO usage.plan_limit_readings (user_id, captured_at, five_hour_used, seven_day_used, seven_day_resets_at)

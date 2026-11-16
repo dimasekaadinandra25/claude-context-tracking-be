@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -29,13 +31,25 @@ func Initialize(db *pgxpool.Pool, roleRepo service.RoleRepository, permissionRea
 	}
 }
 
+const (
+	signInAttempts   = 10
+	refreshAttempts  = 60
+	rateLimitWindow  = time.Minute
+	rateLimitLockout = 5 * time.Minute
+)
+
+var (
+	signInLimiter  = middleware.NewRateLimiter(signInAttempts, rateLimitWindow)
+	refreshLimiter = middleware.NewRateLimiter(refreshAttempts, rateLimitWindow)
+)
+
 // SetupRoutes registers all auth module routes
 func (m *AuthModule) SetupRoutes(router *gin.RouterGroup) {
 	auth := router.Group("/auth")
 	{
 		// Public routes
-		auth.POST("/signin", m.Handler.SignIn)
-		auth.POST("/refresh", m.Handler.Refresh)
+		auth.POST("/signin", middleware.IPBasedRateLimiter(signInLimiter, rateLimitLockout), m.Handler.SignIn)
+		auth.POST("/refresh", middleware.IPBasedRateLimiter(refreshLimiter, rateLimitLockout), m.Handler.Refresh)
 
 		// Protected routes
 		auth.POST("/logout", middleware.JWTAuth(), middleware.RejectApiKey(), m.Handler.Logout)

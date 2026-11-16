@@ -7,7 +7,9 @@ const SUMMARY = 'summary';
 const STALE = 'stale';
 const RUNAWAY = 'runaway';
 const PROJECT = 'project';
-const WORDS = [PACE, SUMMARY, STALE, RUNAWAY, PROJECT];
+const BUDGET = 'budget';
+const VERSION = 'version';
+const WORDS = [PACE, SUMMARY, STALE, RUNAWAY, PROJECT, BUDGET, VERSION];
 const ACTIVE_MS = 10 * 60_000;
 const MIN_PROJECTS = 3;
 const STALE_MS = 24 * HOUR_MS;
@@ -30,6 +32,8 @@ export function rulesFrom(text) {
     stale: parts.includes(STALE),
     runaway: parts.includes(RUNAWAY),
     project: parts.includes(PROJECT),
+    budget: parts.includes(BUDGET),
+    version: parts.includes(VERSION),
   };
 }
 
@@ -99,7 +103,7 @@ export function check(account, now, rules, previous) {
   const elapsed = 1 - left / WEEK_MS;
   const onPace =
     elapsed >= 1 / 7 && account.used < (rules.thresholds[0] ?? FULL) && account.used / elapsed >= FULL;
-  if (rules.pace && account.weekly && onPace && !sent.includes(PACE)) {
+  if (rules.pace && onPace && !sent.includes(PACE)) {
     state.sent.push(PACE);
     return {
       state,
@@ -134,6 +138,7 @@ export function staleMembers(people, now, previous = {}) {
     state[person.user_id] = person.last_synced_at;
     if (previous[person.user_id] === person.last_synced_at) continue;
     alerts.push({
+      userId: person.user_id,
       name: nameOf(person),
       syncedAt,
       hours: Math.floor((now - syncedAt) / HOUR_MS),
@@ -152,12 +157,13 @@ export function runawaySessions(hot, now, previous = {}, link = '') {
     if (state[key]) continue;
     state[key] = session.hour;
     const what = [session.title, session.project].filter(Boolean).join(' in ') || session.session_id;
-    alerts.push(
-      withLink(
+    alerts.push({
+      key,
+      text: withLink(
         `Runaway session: ${session.full_name}'s "${what}" used ${session.share.toFixed(1)}% of the weekly limit within one hour.`,
         link && `${link}/dashboard/sessions/${encodeURIComponent(session.session_id)}`
-      )
-    );
+      ),
+    });
   }
   return { state, alerts };
 }
@@ -176,12 +182,63 @@ export function projectShares(projects, threshold, window, now, previous, link =
     if (share < threshold || state.sent.includes(project.name)) continue;
     state.sent.push(project.name);
     const url = link && project.key && `${link}/dashboard/sessions?project=${encodeURIComponent(project.key)}`;
-    alerts.push(
-      withLink(
+    alerts.push({
+      name: project.name,
+      text: withLink(
         `Project ${project.name} has used ${Math.round(share)}% of the team's Claude tokens this week (alert at ${threshold}%).`,
         url
-      )
-    );
+      ),
+    });
+  }
+  return { state, alerts };
+}
+
+const DAILY_PACE = FULL / 7;
+
+export function memberBudgets(people, daily, day, previous) {
+  const names = new Map(people.filter((p) => p.is_active !== false).map((p) => [p.user_id, nameOf(p)]));
+  const state = { day, sent: previous?.day === day ? [...previous.sent] : [] };
+  const alerts = [];
+  for (const row of daily) {
+    const members = row.account_members;
+    if (row.day !== day || row.limit_used == null || members < 2 || !names.has(row.user_id)) continue;
+    if (state.sent.includes(row.user_id)) continue;
+    const share = row.account_weight > 0 ? projectWeight(row) / row.account_weight : 1 / members;
+    const used = row.limit_used * share;
+    const fair = DAILY_PACE / members;
+    if (used <= fair) continue;
+    state.sent.push(row.user_id);
+    alerts.push({
+      userId: row.user_id,
+      text: `${names.get(row.user_id)} used ${used.toFixed(1)}% of the shared weekly limit today, over their fair share of ${fair.toFixed(1)}% (${DAILY_PACE.toFixed(1)}%/day split between ${members} members).`,
+    });
+  }
+  return { state, alerts };
+}
+
+const versionParts = (version) => version.split('.').map((part) => Number.parseInt(part, 10) || 0);
+
+function newer(a, b) {
+  const [left, right] = [versionParts(a), versionParts(b)];
+  for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
+    if ((left[i] ?? 0) !== (right[i] ?? 0)) return (left[i] ?? 0) > (right[i] ?? 0);
+  }
+  return false;
+}
+
+export function outdatedMembers(people, previous = {}) {
+  const running = people.filter((p) => p.is_active !== false && p.app_version);
+  const newest = running.reduce((best, p) => (newer(p.app_version, best) ? p.app_version : best), '0');
+  const state = {};
+  const alerts = [];
+  for (const person of running) {
+    if (!newer(newest, person.app_version)) continue;
+    state[person.user_id] = newest;
+    if (previous[person.user_id] === newest) continue;
+    alerts.push({
+      userId: person.user_id,
+      text: `${nameOf(person)} runs Claude Usage Monitor ${person.app_version}; ${newest} is out. Click "v${newest} available" in the app's bottom bar to update.`,
+    });
   }
   return { state, alerts };
 }

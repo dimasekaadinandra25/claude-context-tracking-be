@@ -53,6 +53,9 @@ func main() {
 
 	// Initialize Gin router
 	ginRouter := gin.New() // Use gin.New() instead of gin.Default() since we use custom middleware
+	if err := ginRouter.SetTrustedProxies([]string{"127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}); err != nil {
+		logger.Fatal("Invalid trusted proxies", logger.Err(err))
+	}
 
 	// Setup routes (all modules initialized inside router)
 	router.Setup(ginRouter, db.Pool)

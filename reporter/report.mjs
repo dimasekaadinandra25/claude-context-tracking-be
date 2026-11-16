@@ -7,6 +7,8 @@ import {
   check,
   dailySummary,
   lastWeekUsed,
+  memberBudgets,
+  outdatedMembers,
   projectShares,
   rulesFrom,
   runawaySessions,
@@ -29,7 +31,7 @@ const LANGUAGE = env('REPORT_LANG', 'en');
 const LINK = env('REPORT_LINK', '').replace(/\/$/, '');
 const MESSAGE = env('REPORT_MESSAGE', 'Claude usage report {date}');
 const STATE_FILE = env('REPORT_STATE_FILE', '/state/reporter.json');
-const ALERTS = process.env.REPORT_ALERTS ?? '80,90,pace,summary,stale,runaway,project';
+const ALERTS = process.env.REPORT_ALERTS ?? '80,90,pace,summary,stale,runaway,project,budget,version';
 const RUNAWAY_SHARE = Number(env('REPORT_RUNAWAY_SHARE', '5'));
 const PROJECT_SHARE = Number(env('REPORT_PROJECT_SHARE', '40'));
 const CHECK_MS = 30_000;
@@ -42,7 +44,17 @@ const EXPORT_TIMEOUT_MS = 120_000;
 
 const log = (...parts) => console.log(new Date().toISOString(), ...parts);
 
+const SESSION_MS = 30 * 60_000;
+let cached = null;
+
 async function signIn() {
+  if (cached && Date.now() - cached.at < SESSION_MS) return cached.data;
+  const data = await freshSignIn();
+  cached = { data, at: Date.now() };
+  return data;
+}
+
+async function freshSignIn() {
   const res = await fetch(`${API_URL}/core/v1/auth/signin`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -149,6 +161,7 @@ async function get(paths, query) {
       const res = await fetch(`${API_URL}${path}?${params}`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
+      if (res.status === 401) cached = null;
       if (!res.ok) throw new Error(`${path} failed with ${res.status}`);
       return (await res.json()).data;
     })
@@ -160,17 +173,38 @@ function lastDay(paths, daysAgo = 0) {
   return get(paths, { from: new Date(to.getTime() - DAY_MS).toISOString(), to: to.toISOString(), tz: TIME_ZONE });
 }
 
-async function alertAll(hooks, texts) {
-  for (const text of texts) {
-    log(`alert: ${text}`);
-    await notify(hooks, text);
+async function delivered(hooks, text) {
+  log(`alert: ${text}`);
+  const failed = await notify(hooks, text);
+  if (failed === hooks.length) log('alert not delivered, it will be retried on the next check');
+  return failed < hooks.length;
+}
+
+async function alertAll(hooks, alerts, forget) {
+  for (const alert of alerts) {
+    if (!(await delivered(hooks, alert.text))) forget(alert);
   }
+}
+
+async function checkBudgets(hooks, state, members, now) {
+  const [daily] = await lastDay(['/usage/v1/daily']);
+  const result = memberBudgets(members, daily, localNow(new Date(now), TIME_ZONE).day, state.budgets);
+  await alertAll(hooks, result.alerts, (alert) => {
+    result.state.sent = result.state.sent.filter((id) => id !== alert.userId);
+  });
+  state.budgets = result.state;
+}
+
+async function checkVersions(hooks, state, members) {
+  const result = outdatedMembers(members, state.versions);
+  await alertAll(hooks, result.alerts, (alert) => delete result.state[alert.userId]);
+  state.versions = result.state;
 }
 
 async function checkRunaway(hooks, state, now) {
   const [hot] = await get(['/usage/v1/hot-sessions'], { min_share: String(RUNAWAY_SHARE) });
   const result = runawaySessions(hot, now, state.runaway, LINK);
-  await alertAll(hooks, result.alerts);
+  await alertAll(hooks, result.alerts, (alert) => delete result.state[alert.key]);
   state.runaway = result.state;
 }
 
@@ -186,7 +220,9 @@ async function checkProjects(hooks, state, members, now) {
     tz: TIME_ZONE,
   });
   const result = projectShares(projects, PROJECT_SHARE, window, now, state.projects, LINK);
-  await alertAll(hooks, result.alerts);
+  await alertAll(hooks, result.alerts, (alert) => {
+    result.state.sent = result.state.sent.filter((name) => name !== alert.name);
+  });
   state.projects = result.state;
 }
 
@@ -215,18 +251,15 @@ async function checkAlerts(hooks, rules, state) {
   const alerts = { ...state.alerts };
   const members = await people();
   for (const account of accountsFrom(members)) {
-    const { state: next, text, summary } = check(account, now, rules, alerts[account.key]);
-    alerts[account.key] = next;
-    if (text) {
-      log(`alert: ${text}`);
-      await notify(hooks, text);
-    }
+    const previous = alerts[account.key];
+    const { state: next, text, summary } = check(account, now, rules, previous);
+    alerts[account.key] = text && !(await delivered(hooks, text)) ? previous : next;
     if (summary) {
       const ends = localNow(new Date(account.resetsAt), TIME_ZONE);
       const message = `Claude weekly summary: the 7-day window ends ${ends.day} ${ends.time} (${account.members.join(', ')})`;
       try {
         await report(hooks, ends.day, message);
-        alerts[account.key] = summarySent(next);
+        alerts[account.key] = summarySent(alerts[account.key] ?? next);
       } catch (error) {
         log(`weekly summary failed, retrying on the next check: ${error.message}`);
       }
@@ -238,8 +271,7 @@ async function checkAlerts(hooks, rules, state) {
     for (const member of stale.alerts) {
       const last = localNow(new Date(member.syncedAt), TIME_ZONE);
       const text = `${member.name}'s Claude Usage Monitor has not synced for ${member.hours}h (last ${last.day} ${last.time}). Check that the app is running.`;
-      log(`alert: ${text}`);
-      await notify(hooks, text);
+      if (!(await delivered(hooks, text))) delete stale.state[member.userId];
     }
     state.stale = stale.state;
   }
@@ -247,6 +279,10 @@ async function checkAlerts(hooks, rules, state) {
   if (rules.project) {
     await checkProjects(hooks, state, members, now).catch((error) => log(`project check failed: ${error.message}`));
   }
+  if (rules.budget) {
+    await checkBudgets(hooks, state, members, now).catch((error) => log(`budget check failed: ${error.message}`));
+  }
+  if (rules.version) await checkVersions(hooks, state, members).catch((error) => log(`version check failed: ${error.message}`));
   await saveState(state);
 }
 

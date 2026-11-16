@@ -136,6 +136,7 @@ POST /core/v1/auth/signin
 | 401 | Invalid credentials | Wrong email/username or password |
 | 401 | User account is not active | Deactivated by an admin |
 | 401 | User account is locked. Try again later. | Too many failed attempts |
+| 429 | Too many requests | More than 10 sign-ins a minute from one IP (60 a minute for `/refresh`); the IP waits 5 minutes. Behind a proxy the real client IP is only read from `X-Forwarded-For` when the proxy is on a private network |
 
 ---
 

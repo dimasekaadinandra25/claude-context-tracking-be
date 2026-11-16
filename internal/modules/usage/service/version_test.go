@@ -1,6 +1,12 @@
 package service
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+	"time"
+
+	"claude-usage-server/internal/modules/usage/domain"
+)
 
 func TestCostPerMillionSpreadsTheWeeksSpendOverItsTokens(t *testing.T) {
 	got := costPerMillion(26, "default_claude_max_20x", 12_000_000)
@@ -25,5 +31,20 @@ func TestNewestVersionComparesNumbersNotText(t *testing.T) {
 		if got := newestVersion(c.versions); got != c.want {
 			t.Fatalf("newestVersion(%v) = %q, want %q", c.versions, got, c.want)
 		}
+	}
+}
+
+func TestPlanLimitsFromAFastClockAreCappedAtNow(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	raw, err := json.Marshal(domain.PlanLimits{
+		SevenDay:   &domain.PlanWindow{UsedPercentage: 10, ResetsAt: now.Add(48 * time.Hour).Unix()},
+		CapturedAt: now.Add(23 * time.Hour).Unix(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	limits, ok := decodePlanLimits(raw, now)
+	if !ok || limits.CapturedAt != now.Unix() {
+		t.Fatalf("captured_at = %d ok=%v, want it capped at %d", limits.CapturedAt, ok, now.Unix())
 	}
 }

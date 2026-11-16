@@ -99,10 +99,10 @@ func (s *AuthService) SignIn(ctx context.Context, req *dto.SignInRequest, device
 	// Verify password
 	if !crypto.ComparePassword(user.PasswordHash, req.Password) {
 		// Increment failed login count
-		_ = s.userRepo.IncrementFailedLogin(ctx, user.ID)
+		failed, err := s.userRepo.IncrementFailedLogin(ctx, user.ID)
 
 		// Lock user if too many failed attempts
-		if user.FailedLoginCount+1 >= MaxFailedLoginAttempts {
+		if err == nil && failed >= MaxFailedLoginAttempts {
 			lockUntil := time.Now().Add(LockDuration)
 			_ = s.userRepo.LockUser(ctx, user.ID, lockUntil)
 			logger.Warn("User locked due to failed login attempts", logger.String("user_id", user.ID))
