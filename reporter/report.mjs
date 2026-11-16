@@ -10,10 +10,11 @@ import {
   memberBudgets,
   outdatedMembers,
   projectShares,
-  rulesFrom,
   runawaySessions,
+  settingsFrom,
   staleMembers,
   summarySent,
+  weeklyRecap,
 } from './alerts.mjs';
 import { dueDay, hooksFrom, localNow, redact, requestFor, textRequestFor } from './hooks.mjs';
 
@@ -151,8 +152,8 @@ async function send(hooks, build) {
   return failed;
 }
 
-async function report(hooks, day, title = MESSAGE.replace('{date}', day)) {
-  const message = [title, await summary()].filter(Boolean).join('\n');
+async function report(hooks, day, title = MESSAGE.replace('{date}', day), numbers = summary) {
+  const message = [title, await numbers()].filter(Boolean).join('\n');
   const { png, fileName } = await capture();
   log(`captured ${fileName} (${png.length} bytes)`);
   const failed = await send(hooks, (hook) => requestFor(hook, png, fileName, message));
@@ -209,14 +210,14 @@ async function checkVersions(hooks, state, members) {
   state.versions = result.state;
 }
 
-async function checkRunaway(hooks, state, now) {
-  const [hot] = await get(['/usage/v1/hot-sessions'], { min_share: String(RUNAWAY_SHARE) });
+async function checkRunaway(hooks, state, now, share) {
+  const [hot] = await get(['/usage/v1/hot-sessions'], { min_share: String(share) });
   const result = runawaySessions(hot, now, state.runaway, LINK);
   await alertAll(hooks, result.alerts, (alert) => delete result.state[alert.key]);
   state.runaway = result.state;
 }
 
-async function checkProjects(hooks, state, members, now) {
+async function checkProjects(hooks, state, members, now, share) {
   const windows = accountsFrom(members)
     .filter((account) => account.weekly)
     .map((account) => account.resetsAt);
@@ -227,7 +228,7 @@ async function checkProjects(hooks, state, members, now) {
     to: new Date(now).toISOString(),
     tz: TIME_ZONE,
   });
-  const result = projectShares(projects, PROJECT_SHARE, window, now, state.projects, LINK);
+  const result = projectShares(projects, share, window, now, state.projects, LINK);
   await alertAll(hooks, result.alerts, (alert) => {
     result.state.sent = result.state.sent.filter((name) => name !== alert.name);
   });
@@ -254,7 +255,41 @@ async function summary() {
   }
 }
 
-async function checkAlerts(hooks, rules, state) {
+async function weekly(account) {
+  try {
+    const [overview, projects] = await get(['/usage/v1/overview', '/usage/v1/projects'], {
+      from: new Date(account.resetsAt - 7 * DAY_MS).toISOString(),
+      to: new Date().toISOString(),
+      tz: TIME_ZONE,
+    });
+    const link = LINK ? `${LINK}/dashboard/overview` : '';
+    return [weeklyRecap(overview.people, projects, account), link].filter(Boolean).join('\n');
+  } catch (error) {
+    log(`numbers left out of the weekly summary: ${error.message}`);
+    return '';
+  }
+}
+
+const ENV_SETTINGS = { alerts: ALERTS, runawayShare: RUNAWAY_SHARE, projectShare: PROJECT_SHARE };
+let lastSettings = '';
+
+async function alertSettings() {
+  let stored = null;
+  try {
+    [stored] = await get(['/usage/v1/alert-settings']);
+  } catch (error) {
+    log(`alert settings unavailable, using env: ${error.message}`);
+  }
+  const settings = settingsFrom(stored, ENV_SETTINGS);
+  const text = `${settings.alerts || 'none'} (runaway ${settings.runawayShare}%, project ${settings.projectShare}%)`;
+  if (text !== lastSettings) log(`alerts: ${text}${stored ? '' : ' from env'}`);
+  lastSettings = text;
+  return settings;
+}
+
+async function checkAlerts(hooks, state) {
+  const { rules, runawayShare, projectShare } = await alertSettings();
+  if (!anyRule(rules)) return;
   const now = Date.now();
   const alerts = { ...state.alerts };
   const members = await people();
@@ -266,7 +301,7 @@ async function checkAlerts(hooks, rules, state) {
       const ends = localNow(new Date(account.resetsAt), TIME_ZONE);
       const message = `Claude weekly summary: the 7-day window ends ${ends.day} ${ends.time} (${account.members.join(', ')})`;
       try {
-        await report(hooks, ends.day, message);
+        await report(hooks, ends.day, message, () => weekly(account));
         alerts[account.key] = summarySent(alerts[account.key] ?? next);
       } catch (error) {
         log(`weekly summary failed, retrying on the next check: ${error.message}`);
@@ -283,9 +318,11 @@ async function checkAlerts(hooks, rules, state) {
     }
     state.stale = stale.state;
   }
-  if (rules.runaway) await checkRunaway(hooks, state, now).catch((error) => log(`runaway check failed: ${error.message}`));
+  if (rules.runaway) {
+    await checkRunaway(hooks, state, now, runawayShare).catch((error) => log(`runaway check failed: ${error.message}`));
+  }
   if (rules.project) {
-    await checkProjects(hooks, state, members, now).catch((error) => log(`project check failed: ${error.message}`));
+    await checkProjects(hooks, state, members, now, projectShare).catch((error) => log(`project check failed: ${error.message}`));
   }
   if (rules.budget) {
     await checkBudgets(hooks, state, members, now).catch((error) => log(`budget check failed: ${error.message}`));
@@ -298,7 +335,6 @@ async function main() {
   const hooks = hooksFrom(process.env.REPORT_WEBHOOKS);
   const today = () => localNow(new Date(), TIME_ZONE).day;
 
-  const rules = rulesFrom(ALERTS);
   const state = await loadState();
 
   if (process.argv.includes('--now')) {
@@ -308,7 +344,7 @@ async function main() {
   }
   if (process.argv.includes('--alerts')) {
     if (hooks.length === 0) throw new Error('REPORT_WEBHOOKS is empty');
-    await checkAlerts(hooks, rules, state);
+    await checkAlerts(hooks, state);
     return;
   }
   if (hooks.length === 0) {
@@ -349,14 +385,13 @@ async function main() {
     }
   }, CHECK_MS);
 
-  if (!anyRule(rules)) return;
-  log(`checking limits every ${ALERT_CHECK_MS / 60_000} min for ${ALERTS}`);
+  log(`checking limits every ${ALERT_CHECK_MS / 60_000} min, settings from the dashboard or REPORT_ALERTS`);
   let alerting = false;
   const alertTick = async () => {
     if (alerting) return;
     alerting = true;
     try {
-      await checkAlerts(hooks, rules, state);
+      await checkAlerts(hooks, state);
     } catch (error) {
       log(`limit check failed: ${error.message}`);
     } finally {

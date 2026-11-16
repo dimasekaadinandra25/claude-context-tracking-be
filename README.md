@@ -137,7 +137,15 @@ Restore one (this replaces every table in `claude_usage`; the restore runs in on
 make restore FILE=backups/claude_usage-20261102-020000.sql.gz RESTORE_CONFIRM=yes
 ```
 
-Without `RESTORE_CONFIRM=yes` the target only prints what it would do. The dumps live on the same machine as the database; copy `./backups` somewhere else to survive a disk failure.
+Without `RESTORE_CONFIRM=yes` the target only prints what it would do.
+
+After every dump the service restores it into a scratch database `claude_usage_verify`, logs `backup verified: ... (N users, N sessions)` or `backup verify failed`, and drops the scratch database again, so a dump that cannot be restored shows up in `docker compose logs backup` the day it is written. Check any dump by hand (the newest when `FILE` is left out):
+
+```bash
+make verify-backup FILE=backups/claude_usage-20261102-020000.sql.gz
+```
+
+The dumps live on the same machine as the database; copy `./backups` somewhere else to survive a disk failure.
 
 ## Daily Report
 
@@ -158,7 +166,9 @@ make report-now
 
 ### Limit alerts
 
-Every 5 minutes the reporter also reads each Claude account's weekly limit, and every single-model weekly limit Claude reports (such as Fable), and posts a text to the same webhooks when one passes a percentage in `REPORT_ALERTS` (default `80,90,pace,summary,stale,runaway,project,budget,version`). `pace` warns once when the account is on pace to run out before the reset (at least a day into the week, below the first percentage). `summary` posts the report image once during the last hour before the weekly reset, as a record of the finished week; a failed send is retried on the next check. `stale` warns once when an active member's app has not synced for 24 hours (for example the PC is off or the app was closed), and again only after it has synced and stopped again. `runaway` warns once per session and hour when a single session uses `REPORT_RUNAWAY_SHARE` percent (default 5) of its account's weekly limit within one hour, for example a stuck subagent loop. `project` warns once per project and week when one project passes `REPORT_PROJECT_SHARE` percent (default 40) of the team's weighted tokens, starting a day into the week and only once at least 3 projects have tokens that week (with fewer, one of them always passes). With `PUBLIC_URL` set, runaway alerts link to the session and project alerts to that project's sessions on the dashboard. The daily message also shows each account's 5-hour window with every member's share of it and who is active now (a request in the last 10 minutes). `budget` warns once per member and day when someone on a shared Claude account used more than their fair share of the day (14.3%/day split between the account's members), the same rule as the amber outline on the dashboard. `version` warns once per member when they run an older app than the newest one seen on the team. Pace also covers single-model limits such as Fable. An alert counts as sent only once a webhook accepted it, so a Discord outage delays it to the next check instead of dropping it. Each limit alert is sent once per weekly window. Leave `REPORT_ALERTS` empty to turn alerts off. Check now with `docker compose run --rm reporter node report.mjs --alerts`.
+Every 5 minutes the reporter also reads each Claude account's weekly limit, and every single-model weekly limit Claude reports (such as Fable), and posts a text to the same webhooks when one passes a percentage in `REPORT_ALERTS` (default `80,90,pace,summary,stale,runaway,project,budget,version`). `pace` warns once when the account is on pace to run out before the reset (at least a day into the week, below the first percentage). `summary` posts the report image once during the last hour before the weekly reset, as a record of the finished week, with a recap of that window: the weekly limit used, each member's share of the account's weighted tokens with their requests and commits, and the top projects of the week; a failed send is retried on the next check. `stale` warns once when an active member's app has not synced for 24 hours (for example the PC is off or the app was closed), and again only after it has synced and stopped again. `runaway` warns once per session and hour when a single session uses `REPORT_RUNAWAY_SHARE` percent (default 5) of its account's weekly limit within one hour, for example a stuck subagent loop. `project` warns once per project and week when one project passes `REPORT_PROJECT_SHARE` percent (default 40) of the team's weighted tokens, starting a day into the week and only once at least 3 projects have tokens that week (with fewer, one of them always passes). With `PUBLIC_URL` set, runaway alerts link to the session and project alerts to that project's sessions on the dashboard. The daily message also shows each account's 5-hour window with every member's share of it and who is active now (a request in the last 10 minutes). `budget` warns once per member and day when someone on a shared Claude account used more than their fair share of the day (14.3%/day split between the account's members), the same rule as the amber outline on the dashboard. `version` warns once per member when they run an older app than the newest one seen on the team. Pace also covers single-model limits such as Fable. An alert counts as sent only once a webhook accepted it, so a Discord outage delays it to the next check instead of dropping it. Each limit alert is sent once per weekly window. Leave `REPORT_ALERTS` empty to turn alerts off. Check now with `docker compose run --rm reporter node report.mjs --alerts`.
+
+An admin can change the alerts and both shares on the dashboard (**Admin › Alert settings**, `PUT /usage/v1/alert-settings`). The reporter reads them on every check, so a change applies within 5 minutes without a restart; saved values override `REPORT_ALERTS`, `REPORT_RUNAWAY_SHARE` and `REPORT_PROJECT_SHARE`, and the env values are used while nothing is saved or the read fails (logged). The reporter account must be a `usage_viewer` or an admin to read them.
 
 ## Going Online
 
@@ -217,6 +227,8 @@ Files live in `internal/database/migrations/core` and are named by timestamp: `Y
 | `20261104010000_tool_activity_plan_limits` | new tables `usage.session_tool_hours` (calls, lines and commits per session, hour and tool) and `usage.plan_limits` (latest 5-hour and 7-day usage per member) |
 | `20261111010000_plan_history_accounts` | new tables `usage.plan_limit_readings` (every plan limit reading, seeded from `usage.plan_limits`) and `usage.claude_accounts` (Claude account email, plan and tier per member) |
 | `20261113010000_plan_model_limits` | `usage.plan_limits.model_limits` (JSONB list of single-model weekly limits such as Fable from the latest reading) |
+| `20261116010000_alert_settings` | `usage.alert_settings` (single row: the reporter's alerts, runaway and project shares, edited on the dashboard) |
+| `20261116020000_audit_logs` | new lean `core.audit_logs` (admin actions and own password changes, kept 365 days) |
 
 ## API
 

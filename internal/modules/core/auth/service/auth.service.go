@@ -36,7 +36,6 @@ const (
 	MaxFailedLoginAttempts = 5
 	LockDuration           = 15 * time.Minute
 	RefreshTokenExpiry     = 7 * 24 * time.Hour // 7 days
-	AccessTokenExpiryHours = 24
 )
 
 // RoleRepository interface for role operations
@@ -161,7 +160,7 @@ func (s *AuthService) SignIn(ctx context.Context, req *dto.SignInRequest, device
 		AccessToken:  accessToken,
 		RefreshToken: refreshTokenStr,
 		TokenType:    "Bearer",
-		ExpiresIn:    AccessTokenExpiryHours * 3600,
+		ExpiresIn:    int(jwt.GetExpirationTime().Seconds()),
 		User: dto.UserInfo{
 			ID:                 user.ID,
 			Email:              user.Email,
@@ -254,7 +253,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshTokenStr string) 
 		AccessToken:  accessToken,
 		RefreshToken: newRefreshTokenStr,
 		TokenType:    "Bearer",
-		ExpiresIn:    AccessTokenExpiryHours * 3600,
+		ExpiresIn:    int(jwt.GetExpirationTime().Seconds()),
 	}, nil
 }
 

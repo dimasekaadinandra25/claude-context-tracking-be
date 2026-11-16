@@ -12,8 +12,10 @@ import {
   projectShares,
   rulesFrom,
   runawaySessions,
+  settingsFrom,
   staleMembers,
   summarySent,
+  weeklyRecap,
 } from './alerts.mjs';
 
 const HOUR = 3_600_000;
@@ -45,6 +47,26 @@ test('reads thresholds and pace', () => {
   const none = rulesFrom('');
   assert.equal(anyRule(none), false);
   assert.equal(anyRule(rulesFrom('stale')), true);
+});
+
+test('stored alert settings override env, which stays the fallback', () => {
+  const env = { alerts: '80,90,pace', runawayShare: 5, projectShare: 40 };
+  const fromEnv = settingsFrom(null, env);
+  assert.equal(fromEnv.alerts, '80,90,pace');
+  assert.deepEqual(fromEnv.rules, rulesFrom('80,90,pace'));
+  assert.equal(fromEnv.runawayShare, 5);
+  assert.equal(fromEnv.projectShare, 40);
+
+  const stored = settingsFrom({ alerts: '95,stale', runaway_share: 10, project_share: 25 }, env);
+  assert.deepEqual(stored.rules.thresholds, [95]);
+  assert.equal(stored.rules.stale, true);
+  assert.equal(stored.rules.pace, false);
+  assert.equal(stored.runawayShare, 10);
+  assert.equal(stored.projectShare, 25);
+
+  const off = settingsFrom({ alerts: '', runaway_share: 10, project_share: 25 }, env);
+  assert.equal(anyRule(off.rules), false);
+  assert.equal(settingsFrom({}, env).alerts, '80,90,pace');
 });
 
 test('groups members of one claude account and skips inactive or unknown ones', () => {
@@ -251,4 +273,31 @@ test('members on an older app version are reported once per new version', () => 
   assert.deepEqual(outdatedMembers(people, first.state).alerts, []);
   people[1].app_version = '0.3.10';
   assert.deepEqual(outdatedMembers(people, first.state), { state: {}, alerts: [] });
+});
+
+test('weekly recap splits the account by member and lists the week top projects', () => {
+  const tokens = (input, output, subagent = 0) => ({
+    input_tokens: input,
+    cache_write_tokens: 0,
+    cache_read_tokens: 0,
+    output_tokens: output,
+    subagent_output_tokens: subagent,
+  });
+  const people = [
+    person({ user_id: 'a', full_name: 'Dummy A', requests: 40, commits: 3, ...tokens(500, 50, 10) }),
+    person({ user_id: 'b', full_name: 'Dummy B', requests: 10, ...tokens(200, 0) }),
+    person({ user_id: 'c', full_name: 'Dummy C', requests: 0, ...tokens(0, 0) }),
+    person({ user_id: 'd', full_name: 'Other', claude_email: 'solo@x.test', requests: 9, ...tokens(900, 0) }),
+  ];
+  const [account] = accountsFrom(people);
+  const projects = [{ project: 'api', ...tokens(800, 0) }, { project: 'web', ...tokens(200, 0) }];
+  assert.equal(
+    weeklyRecap(people, projects, account),
+    [
+      'Weekly limit 50% used',
+      'This week by member: Dummy A 80% (40 requests, 3 commits) · Dummy B 20% (10 requests, 0 commits)',
+      'Top projects, this week: api 80% · web 20%',
+    ].join('\n')
+  );
+  assert.equal(weeklyRecap([], [], account), 'Weekly limit 50% used');
 });

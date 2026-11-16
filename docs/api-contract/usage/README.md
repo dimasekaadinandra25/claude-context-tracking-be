@@ -3,7 +3,7 @@
 **Version:** v1
 **Base URLs:** `/usage/v1` (ingest and reports), `/core/v1/admin` (user and API key administration)
 **Module:** Usage
-**Last Updated:** 2026-11-02
+**Last Updated:** 2026-11-16
 
 ---
 
@@ -108,6 +108,10 @@ Every route with an `:id` returns 404 for an unknown id or one that is not a UUI
 | 18 | PUT | `/usage/v1/budgets/:user_id` | JWT, admin |
 | 19 | DELETE | `/usage/v1/budgets/:user_id` | JWT, admin |
 | 20 | GET | `/usage/v1/projects` | JWT |
+| 27 | GET | `/usage/v1/alert-settings` | JWT, admin or `usage_viewer` |
+| 28 | PUT | `/usage/v1/alert-settings` | JWT, admin |
+| 29 | GET | `/core/v1/admin/audit-logs` | JWT, admin |
+| 30 | PUT | `/core/v1/admin/users/:id/role` | JWT, admin |
 
 ---
 
@@ -868,6 +872,68 @@ DELETE /usage/v1/budgets/:user_id
 
 ---
 
+## Alert Settings
+
+The reporter's alert settings, one row in `usage.alert_settings`. The reporter reads them on every alert check (every 5 minutes); stored values override its `REPORT_ALERTS`, `REPORT_RUNAWAY_SHARE` and `REPORT_PROJECT_SHARE` env, and it falls back to env when nothing is stored or the read fails.
+
+### 27. Get Alert Settings
+
+```
+GET /usage/v1/alert-settings
+```
+
+**Auth:** JWT of an admin or a `usage_viewer`. Members get 403 `admins only`.
+
+**Response (200):**
+```json
+{
+  "data": { "alerts": "80,90,pace,summary,stale,runaway,project,budget,version", "runaway_share": 5, "project_share": 40 },
+  "message": "Alert settings retrieved"
+}
+```
+
+`data` is `null` when nothing has been saved yet.
+
+| Field | Notes |
+|-------|-------|
+| `alerts` | Comma-separated: integer percent thresholds of the weekly limit (1-100) and the words `pace`, `summary`, `stale`, `runaway`, `project`, `budget`, `version`. `""` turns every alert off |
+| `runaway_share` | A session using at least this % of the 5-hour window is flagged (1-100) |
+| `project_share` | A project using at least this % of the weekly window is flagged (1-100) |
+
+---
+
+### 28. Save Alert Settings
+
+Creates or replaces the settings.
+
+```
+PUT /usage/v1/alert-settings
+```
+
+**Auth:** JWT, admin. Others get 403 `admins only`.
+
+**Request:**
+```json
+{ "alerts": "80, 90, pace", "runaway_share": 5, "project_share": 40 }
+```
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `alerts` | string | Yes (may be `""`) | Max 500 characters. Split on commas and spaces, lower-cased, duplicates dropped, numbers written without leading zeros |
+| `runaway_share` | int | Yes | 1-100 |
+| `project_share` | int | Yes | 1-100 |
+
+**Response (200):** the saved settings as stored, message `Alert settings saved`:
+```json
+{ "data": { "alerts": "80,90,pace", "runaway_share": 5, "project_share": 40 }, "message": "Alert settings saved" }
+```
+
+Each save writes an `alert_settings.update` entry to the [audit log](#29-list-audit-logs).
+
+**Errors:** 400 `Invalid request payload` (missing field, a share outside 1-100, or an alert part that is neither a known word nor an integer from 1 to 100), 401 `Unauthorized`, 403 `Forbidden`.
+
+---
+
 ## Admin Endpoints
 
 All under `/core/v1/admin`, JWT of a `super_admin`.
@@ -1027,6 +1093,28 @@ POST /core/v1/admin/users/:id/reset-password
 
 ---
 
+### 30. Set Role
+
+```
+PUT /core/v1/admin/users/:id/role
+```
+
+**Request:**
+```json
+{ "role": "usage_viewer" }
+```
+
+`role` is one of `member` (sees own usage), `usage_viewer` (read-only view of every member, no admin pages) or `super_admin`. The user ends up with exactly that one of the three; other roles are kept. The new role takes effect on the user's next token refresh, within `JWT_EXPIRATION` (default 1h).
+
+**Response (200):**
+```json
+{ "data": { "role": "usage_viewer" }, "message": "Role updated successfully" }
+```
+
+**Errors:** 400 invalid payload or unknown role, 400 `Cannot change your own role`, 404 `User not found`.
+
+---
+
 ### 13. Issue API Key for a User
 
 Creates a key owned by the user. Validation uses only the SHA-256 hash of the secret; the full key is also stored AES-256-GCM encrypted so an admin can copy it later with [16. Reveal an API Key](#16-reveal-an-api-key).
@@ -1148,6 +1236,62 @@ GET /core/v1/admin/api-keys/:id/reveal
 | 410 | `key is not active` | Key revoked, expired or deleted |
 
 Rotating `API_KEY_ENCRYPTION_KEY` makes existing keys un-revealable (409); they keep authenticating. Issue a new key to get a copyable one.
+
+---
+
+### 29. List Audit Logs
+
+Admin actions, newest first, from `core.audit_logs`. An entry is written after each successful create user (8), deactivate (10), activate (11), reset password (12), issue key (13), revoke key (15), reveal key (16), save alert settings (28) and set role (30), when any user changes their own password (`POST /core/v1/auth/change-password`, `PUT /core/v1/users/me/password`), and when a user creates or revokes their own API key (`POST`/`DELETE /core/v1/api-keys`). Failed actions are not logged. If writing the entry fails, the action still succeeds and the error is only logged. Entries older than 365 days are deleted by the API's hourly cleanup.
+
+```
+GET /core/v1/admin/audit-logs?page=1&limit=50&action=api_key.revoke&actor=mia
+```
+
+| Param | Notes |
+|-------|-------|
+| `page` | Default 1 |
+| `limit` | 1-200, default 50 |
+| `action` | Exact action, see below |
+| `actor` | Substring of the actor's email (case-insensitive) or the actor's user id |
+
+**Response (200):**
+```json
+{
+  "data": [
+    {
+      "id": "0b7f9e2e-3c55-4d7e-9a47-5a3c2f1d9e10",
+      "actor_id": "b61e8255-5aef-42a3-8fdc-8c191295af10",
+      "actor_email": "admin@claude-usage.local",
+      "action": "api_key.revoke",
+      "target_type": "api_key",
+      "target_id": "5e0f3a1c-8f4b-4f6e-9d3a-2b7c1e0a9f88",
+      "target_label": "mia@claude-usage.local · MIA-LAPTOP",
+      "summary": "lost laptop",
+      "ip": "172.18.0.1",
+      "created_at": "2026-11-16T03:12:45.120Z"
+    }
+  ],
+  "message": "Audit logs retrieved",
+  "meta": { "pagination": { "page": 1, "limit": 50, "total": 1, "total_pages": 1 } }
+}
+```
+
+| `action` | `target_type` | `summary` |
+|----------|---------------|-----------|
+| `user.create` | `user` | `Created with the member role` |
+| `user.deactivate` | `user` | `All API keys revoked` |
+| `user.activate` | `user` | |
+| `user.reset_password` | `user` | `Must change password at next sign-in` |
+| `user.change_password` | `user` (the actor) | |
+| `user.change_role` | `user` | `member → usage_viewer` (`none` when the user had none of the three) |
+| `api_key.issue` | `api_key` | `Own key` when users made it themselves |
+| `api_key.reveal` | `api_key` | |
+| `api_key.revoke` | `api_key` | The reason, if given; `Own key` (`Own key: reason`) for a user's own key |
+| `alert_settings.update` | `alert_settings` (`target_id` empty) | `alerts "80,pace", runaway 5%, project 40%` |
+
+`target_label` is looked up when listing: the user's email, or the key owner's email and the key name; empty when the target no longer exists. `actor_id` is `null` only for entries without a signed-in actor.
+
+**Errors:** 400 `Invalid query parameters` (e.g. `limit` over 200), 401 `Unauthorized`, 403 `Forbidden` (not `super_admin`, or an API key).
 
 ---
 

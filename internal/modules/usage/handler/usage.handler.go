@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"claude-usage-server/internal/middleware"
+	audit "claude-usage-server/internal/modules/core/audit/service"
 	"claude-usage-server/internal/modules/usage/dto"
 	"claude-usage-server/internal/modules/usage/service"
 	"claude-usage-server/internal/shared/response"
@@ -18,10 +19,15 @@ const maxIngestBytes = 64 << 20
 
 type Handler struct {
 	service *service.Service
+	audit   *audit.AuditService
 }
 
 func New(svc *service.Service) *Handler {
 	return &Handler{service: svc}
+}
+
+func (h *Handler) SetAuditor(a *audit.AuditService) {
+	h.audit = a
 }
 
 func (h *Handler) Ingest(c *gin.Context) {

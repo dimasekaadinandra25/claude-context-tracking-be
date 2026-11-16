@@ -3,10 +3,13 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"claude-usage-server/internal/middleware"
+	auditDomain "claude-usage-server/internal/modules/core/audit/domain"
+	audit "claude-usage-server/internal/modules/core/audit/service"
 	"claude-usage-server/internal/modules/core/user/dto"
 	"claude-usage-server/internal/modules/core/user/service"
 	"claude-usage-server/internal/shared/response"
@@ -14,12 +17,17 @@ import (
 
 type UserHandler struct {
 	userService *service.UserService
+	audit       *audit.AuditService
 }
 
 func NewUserHandler(userService *service.UserService) *UserHandler {
 	return &UserHandler{
 		userService: userService,
 	}
+}
+
+func (h *UserHandler) SetAuditor(a *audit.AuditService) {
+	h.audit = a
 }
 
 func (h *UserHandler) GetAll(c *gin.Context) {
@@ -84,6 +92,7 @@ func (h *UserHandler) Create(c *gin.Context) {
 		return
 	}
 
+	h.audit.Record(c, auditDomain.ActionUserCreate, auditDomain.TargetUser, result.ID, "Created with the member role")
 	response.Success(c, http.StatusCreated, "User created successfully", result)
 }
 
@@ -99,6 +108,11 @@ func (h *UserHandler) setActive(c *gin.Context, active bool, message string) {
 	err := h.userService.SetActive(c.Request.Context(), middleware.MustGetUserID(c), c.Param("id"), active)
 	switch {
 	case err == nil:
+		if active {
+			h.audit.Record(c, auditDomain.ActionUserActivate, auditDomain.TargetUser, c.Param("id"), "")
+		} else {
+			h.audit.Record(c, auditDomain.ActionUserDeactivate, auditDomain.TargetUser, c.Param("id"), "All API keys revoked")
+		}
 		response.Success(c, http.StatusOK, message, nil)
 	case errors.Is(err, service.ErrUserNotFound):
 		response.Error(c, http.StatusNotFound, "User not found", "")
@@ -106,6 +120,33 @@ func (h *UserHandler) setActive(c *gin.Context, active bool, message string) {
 		response.Error(c, http.StatusBadRequest, "Cannot deactivate yourself", "")
 	default:
 		response.Error(c, http.StatusInternalServerError, "Failed to update user", err.Error())
+	}
+}
+
+func (h *UserHandler) SetRole(c *gin.Context) {
+	var req dto.SetRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "Invalid request payload", err.Error())
+		return
+	}
+
+	before, err := h.userService.SetRole(c.Request.Context(), middleware.MustGetUserID(c), c.Param("id"), req.Role)
+	switch {
+	case err == nil:
+		from := strings.Join(before, ", ")
+		if from == "" {
+			from = "none"
+		}
+		h.audit.Record(c, auditDomain.ActionUserChangeRole, auditDomain.TargetUser, c.Param("id"), from+" → "+req.Role)
+		response.Success(c, http.StatusOK, "Role updated successfully", gin.H{"role": req.Role})
+	case errors.Is(err, service.ErrUserNotFound):
+		response.Error(c, http.StatusNotFound, "User not found", "")
+	case errors.Is(err, service.ErrChangeOwnRole):
+		response.Error(c, http.StatusBadRequest, "Cannot change your own role", "")
+	case errors.Is(err, service.ErrInvalidRole):
+		response.Error(c, http.StatusBadRequest, "Invalid role", "")
+	default:
+		response.Error(c, http.StatusInternalServerError, "Failed to update role", err.Error())
 	}
 }
 
@@ -119,6 +160,7 @@ func (h *UserHandler) ResetPassword(c *gin.Context) {
 	err := h.userService.ResetPassword(c.Request.Context(), middleware.MustGetUserID(c), c.Param("id"), req.Password)
 	switch {
 	case err == nil:
+		h.audit.Record(c, auditDomain.ActionUserResetPassword, auditDomain.TargetUser, c.Param("id"), "Must change password at next sign-in")
 		response.Success(c, http.StatusOK, "Password reset successfully", nil)
 	case errors.Is(err, service.ErrUserNotFound):
 		response.Error(c, http.StatusNotFound, "User not found", "")
@@ -190,5 +232,6 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 
+	h.audit.Record(c, auditDomain.ActionUserChangePassword, auditDomain.TargetUser, userID, "")
 	response.Success(c, http.StatusOK, "Password changed successfully", nil)
 }

@@ -39,4 +39,6 @@ func (m *Module) SetupRoutes(rg *gin.RouterGroup) {
 	rg.GET("/budgets", m.Handler.Budgets)
 	rg.PUT("/budgets/:user_id", m.Handler.SetBudget)
 	rg.DELETE("/budgets/:user_id", m.Handler.DeleteBudget)
+	rg.GET("/alert-settings", m.Handler.AlertSettings)
+	rg.PUT("/alert-settings", m.Handler.SetAlertSettings)
 }

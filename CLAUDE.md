@@ -51,7 +51,7 @@ make test-db                                     # create/migrate/seed claude_us
 TEST_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/claude_usage_test?sslmode=disable" go test -count=1 ./...
 ```
 
-Route-level tests that use `JWTAuth` must call `middleware.SetUserValidator(...)` (it fails closed), or use `router.Setup` as `internal/router/router_test.go` does. Tests that create API keys must `t.Setenv(keycrypt.EnvName, ...)` with 64 hex chars. DB tests use `internal/testutil/testdb`: `Open(t)` skips without `TEST_DATABASE_URL`, takes a Postgres advisory lock so packages don't race, truncates `usage.*` and `core.api_keys`, and deletes every user except `admin`. `User(t, pool, email, admin)` creates a member or super admin. Never point it at `claude_usage`.
+Route-level tests that use `JWTAuth` must call `middleware.SetUserValidator(...)` (it fails closed), or use `router.Setup` as `internal/router/router_test.go` does. Tests that create API keys must `t.Setenv(keycrypt.EnvName, ...)` with 64 hex chars. DB tests use `internal/testutil/testdb`: `Open(t)` skips without `TEST_DATABASE_URL`, takes a Postgres advisory lock so packages don't race, truncates `usage.*`, `core.api_keys` and `core.audit_logs`, and deletes every user except `admin`. `User(t, pool, email, admin)` creates a member or super admin. Never point it at `claude_usage`.
 
 ## Architecture
 
@@ -62,16 +62,17 @@ internal/
 ├── modules/
 │   ├── core/
 │   │   ├── auth/        # signin, refresh, logout, me, change-password
-│   │   ├── user/        # /users/me, /admin/users (create, list, deactivate, activate, reset-password)
+│   │   ├── user/        # /users/me, /admin/users (create, list, deactivate, activate, reset-password, role)
 │   │   ├── role/        # roles and permission levels
-│   │   └── api_key/     # self-service /api-keys, /admin/users/:id/api-keys, /admin/api-keys/:id/revoke|reveal
-│   └── usage/           # ingest + reports (/usage/v1)
+│   │   ├── api_key/     # self-service /api-keys, /admin/users/:id/api-keys, /admin/api-keys/:id/revoke|reveal
+│   │   └── audit/       # /admin/audit-logs; handlers call AuditService.Record after admin actions (never fails them)
+│   └── usage/           # ingest + reports + alert settings (/usage/v1)
 ├── shared/              # authz, query builder, response envelope
 ├── middleware/          # JWTAuth (JWT or X-API-Key), RequireRole, RequirePermission, RejectApiKey
 └── router/router.go     # module wiring and route registration
 ```
 
-Each module follows `domain/ dto/ handler/ repository/ service/ main.<module>.go`, where `main.<module>.go` exports `Initialize(db, ...)` and `SetupRoutes(router)`. Cross-module dependencies are wired in `router.go` with setters (e.g. `middleware.SetApiKeyValidator(apiKeyModule.Service)`, `userModule.Service.SetKeyRevoker(apiKeyModule.Service)`).
+Each module follows `domain/ dto/ handler/ repository/ service/ main.<module>.go`, where `main.<module>.go` exports `Initialize(db, ...)` and `SetupRoutes(router)`. Cross-module dependencies are wired in `router.go` with setters (e.g. `middleware.SetApiKeyValidator(apiKeyModule.Service)`, `userModule.Service.SetKeyRevoker(apiKeyModule.Service)`, `userModule.Handler.SetAuditor(auditModule.Service)`).
 
 ### Routes
 

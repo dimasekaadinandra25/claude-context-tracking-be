@@ -9,15 +9,22 @@ import (
 	"claude-usage-server/internal/middleware"
 	"claude-usage-server/internal/modules/core/api_key/dto"
 	"claude-usage-server/internal/modules/core/api_key/service"
+	auditDomain "claude-usage-server/internal/modules/core/audit/domain"
+	audit "claude-usage-server/internal/modules/core/audit/service"
 	"claude-usage-server/internal/shared/response"
 )
 
 type ApiKeyHandler struct {
 	apiKeyService *service.ApiKeyService
+	audit         *audit.AuditService
 }
 
 func NewApiKeyHandler(apiKeyService *service.ApiKeyService) *ApiKeyHandler {
 	return &ApiKeyHandler{apiKeyService: apiKeyService}
+}
+
+func (h *ApiKeyHandler) SetAuditor(a *audit.AuditService) {
+	h.audit = a
 }
 
 func (h *ApiKeyHandler) Create(c *gin.Context) {
@@ -39,6 +46,7 @@ func (h *ApiKeyHandler) Create(c *gin.Context) {
 		return
 	}
 
+	h.audit.Record(c, auditDomain.ActionApiKeyIssue, auditDomain.TargetApiKey, result.ID, "Own key")
 	response.Success(c, http.StatusCreated, "API key created successfully", result)
 }
 
@@ -124,6 +132,12 @@ func (h *ApiKeyHandler) Revoke(c *gin.Context) {
 		return
 	}
 
+	summary := "Own key"
+	if req.Reason != nil && *req.Reason != "" {
+		summary += ": " + *req.Reason
+	}
+	h.audit.Record(c, auditDomain.ActionApiKeyRevoke, auditDomain.TargetApiKey, id, summary)
+
 	response.Success(c, http.StatusOK, "API key revoked successfully", nil)
 }
 
@@ -144,6 +158,7 @@ func (h *ApiKeyHandler) CreateForUser(c *gin.Context) {
 		return
 	}
 
+	h.audit.Record(c, auditDomain.ActionApiKeyIssue, auditDomain.TargetApiKey, apiKey.ID, "")
 	response.Success(c, http.StatusCreated, "API key created successfully", service.NewCreateResponse(fullKey, apiKey))
 }
 
@@ -172,6 +187,12 @@ func (h *ApiKeyHandler) AdminRevoke(c *gin.Context) {
 		return
 	}
 
+	reason := ""
+	if req.Reason != nil {
+		reason = *req.Reason
+	}
+	h.audit.Record(c, auditDomain.ActionApiKeyRevoke, auditDomain.TargetApiKey, c.Param("id"), reason)
+
 	response.Success(c, http.StatusOK, "API key revoked successfully", nil)
 }
 
@@ -182,6 +203,7 @@ func (h *ApiKeyHandler) Reveal(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
+	h.audit.Record(c, auditDomain.ActionApiKeyReveal, auditDomain.TargetApiKey, c.Param("id"), "")
 	response.Success(c, http.StatusOK, "API key revealed", gin.H{"key": key})
 }
 

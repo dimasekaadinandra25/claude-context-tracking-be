@@ -41,6 +41,16 @@ export function anyRule(rules) {
   return rules.thresholds.length > 0 || WORDS.some((word) => rules[word]);
 }
 
+export function settingsFrom(stored, fallback) {
+  const alerts = typeof stored?.alerts === 'string' ? stored.alerts : fallback.alerts;
+  return {
+    alerts,
+    rules: rulesFrom(alerts),
+    runawayShare: stored?.runaway_share || fallback.runawayShare,
+    projectShare: stored?.project_share || fallback.projectShare,
+  };
+}
+
 const accountKey = (person) => (person.claude_email || person.user_id).toLowerCase();
 const nameOf = (person) => person.full_name || person.email;
 
@@ -172,7 +182,7 @@ export function projectShares(projects, threshold, window, now, previous, link =
   const sent = previous && sameWindow(previous.window, window) ? previous.sent : [];
   const state = { window, sent: [...sent] };
   const weighed = projects
-    .map((project) => ({ key: project.project, name: project.project || 'Private', weight: projectWeight(project) }))
+    .map((project) => ({ key: project.project, name: project.project || 'Private', weight: weightOf(project) }))
     .filter((project) => project.weight > 0);
   const total = weighed.reduce((sum, project) => sum + project.weight, 0);
   if (weighed.length < MIN_PROJECTS || now - (window - WEEK_MS) < DAY_MS) return { state, alerts: [] };
@@ -203,7 +213,7 @@ export function memberBudgets(people, daily, day, previous) {
     const members = row.account_members;
     if (row.day !== day || row.limit_used == null || members < 2 || !names.has(row.user_id)) continue;
     if (state.sent.includes(row.user_id)) continue;
-    const share = row.account_weight > 0 ? projectWeight(row) / row.account_weight : 1 / members;
+    const share = row.account_weight > 0 ? weightOf(row) / row.account_weight : 1 / members;
     const used = row.limit_used * share;
     const fair = DAILY_PACE / members;
     if (used <= fair) continue;
@@ -288,18 +298,18 @@ function weeklyLine(account, now, lastWeek) {
   return parts.join(' · ');
 }
 
-function projectWeight(project) {
+function weightOf(row) {
   return (
-    project.input_tokens +
-    project.cache_write_tokens +
-    project.cache_read_tokens +
-    OUTPUT_WEIGHT * project.output_tokens
+    row.input_tokens +
+    row.cache_write_tokens +
+    row.cache_read_tokens +
+    OUTPUT_WEIGHT * (row.output_tokens + (row.subagent_output_tokens ?? 0))
   );
 }
 
-function topProjectsLine(projects) {
+function topProjectsLine(projects, period = 'last 24h') {
   const weighed = projects
-    .map((project) => ({ name: project.project || 'Private', weight: projectWeight(project) }))
+    .map((project) => ({ name: project.project || 'Private', weight: weightOf(project) }))
     .filter((project) => project.weight > 0)
     .sort((a, b) => b.weight - a.weight);
   const total = weighed.reduce((sum, project) => sum + project.weight, 0);
@@ -308,7 +318,27 @@ function topProjectsLine(projects) {
   const parts = weighed.slice(0, TOP_PROJECTS).map((project) => `${project.name} ${share(project.weight)}`);
   const rest = weighed.slice(TOP_PROJECTS).reduce((sum, project) => sum + project.weight, 0);
   if (rest > 0) parts.push(`others ${share(rest)}`);
-  return `Top projects, last 24h: ${parts.join(' · ')}`;
+  return `Top projects, ${period}: ${parts.join(' · ')}`;
+}
+
+export function weeklyRecap(people, projects, account) {
+  const members = people
+    .filter((person) => accountKey(person) === account.key)
+    .map((person) => ({ person, weight: weightOf(person) }))
+    .filter((member) => member.weight > 0)
+    .sort((a, b) => b.weight - a.weight);
+  const total = members.reduce((sum, member) => sum + member.weight, 0);
+  const lines = [`Weekly limit ${Math.round(account.used)}% used`];
+  if (total > 0) {
+    const who = members.map(
+      ({ person, weight }) =>
+        `${nameOf(person)} ${Math.round((weight / total) * FULL)}% (${person.requests} requests, ${person.commits ?? 0} commits)`
+    );
+    lines.push(`This week by member: ${who.join(' · ')}`);
+  }
+  const top = topProjectsLine(projects, 'this week');
+  if (top) lines.push(top);
+  return lines.join('\n');
 }
 
 export function dailySummary(people, projects, now, lastWeek = new Map(), link = '') {

@@ -1,6 +1,6 @@
 # Claude Usage Server API Contract
 
-**Last Updated:** 2026-10-30
+**Last Updated:** 2026-11-16
 
 ---
 
@@ -41,7 +41,7 @@ Ingest from the desktop app, dashboard reports, and admin management of users an
 
 | File | Endpoints | Description |
 |------|-----------|-------------|
-| [usage/README.md](usage/README.md) | 16 + 5 self-service key routes | Ingest, overview, timeseries, models, sessions, people, admin users and keys (issue, list, revoke, reveal) |
+| [usage/README.md](usage/README.md) | 29 + 5 self-service key routes | Ingest, overview, timeseries, models, sessions, people, budgets, alert settings, admin users and keys (issue, list, revoke, reveal), audit log |
 
 ---
 

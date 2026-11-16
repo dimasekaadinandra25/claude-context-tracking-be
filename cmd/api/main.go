@@ -7,6 +7,8 @@ import (
 
 	"claude-usage-server/internal/config"
 	"claude-usage-server/internal/database"
+	auditDomain "claude-usage-server/internal/modules/core/audit/domain"
+	auditRepo "claude-usage-server/internal/modules/core/audit/repository"
 	authRepo "claude-usage-server/internal/modules/core/auth/repository"
 	"claude-usage-server/internal/router"
 	"claude-usage-server/pkg/jwt"
@@ -53,7 +55,7 @@ func main() {
 
 	logger.Info("Database connected successfully")
 
-	go pruneRefreshTokens(authRepo.NewRefreshTokenRepository(db.Pool))
+	go pruneRefreshTokens(authRepo.NewRefreshTokenRepository(db.Pool), auditRepo.NewAuditRepository(db.Pool))
 
 	// Initialize Gin router
 	ginRouter := gin.New() // Use gin.New() instead of gin.Default() since we use custom middleware
@@ -73,9 +75,12 @@ func main() {
 	}
 }
 
-func pruneRefreshTokens(repo *authRepo.RefreshTokenRepository) {
+func pruneRefreshTokens(repo *authRepo.RefreshTokenRepository, audits *auditRepo.AuditRepository) {
 	for {
 		_ = repo.DeleteExpired(context.Background())
+		if _, err := audits.Prune(context.Background(), time.Now().Add(-auditDomain.Retention)); err != nil {
+			logger.Error("Failed to prune audit logs", logger.Err(err))
+		}
 		time.Sleep(time.Hour)
 	}
 }

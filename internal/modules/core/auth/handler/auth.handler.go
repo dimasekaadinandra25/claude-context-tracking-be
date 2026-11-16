@@ -7,6 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"claude-usage-server/internal/middleware"
+	auditDomain "claude-usage-server/internal/modules/core/audit/domain"
+	audit "claude-usage-server/internal/modules/core/audit/service"
 	"claude-usage-server/internal/modules/core/auth/dto"
 	"claude-usage-server/internal/modules/core/auth/service"
 	"claude-usage-server/internal/shared/response"
@@ -14,12 +16,17 @@ import (
 
 type AuthHandler struct {
 	authService *service.AuthService
+	audit       *audit.AuditService
 }
 
 func NewAuthHandler(authService *service.AuthService) *AuthHandler {
 	return &AuthHandler{
 		authService: authService,
 	}
+}
+
+func (h *AuthHandler) SetAuditor(a *audit.AuditService) {
+	h.audit = a
 }
 
 func (h *AuthHandler) SignIn(c *gin.Context) {
@@ -138,7 +145,8 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	err := h.authService.ChangePassword(c.Request.Context(), middleware.MustGetUserID(c), &req)
+	userID := middleware.MustGetUserID(c)
+	err := h.authService.ChangePassword(c.Request.Context(), userID, &req)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidPassword):
@@ -151,5 +159,6 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 
+	h.audit.Record(c, auditDomain.ActionUserChangePassword, auditDomain.TargetUser, userID, "")
 	response.Success(c, http.StatusOK, "Password changed successfully", nil)
 }

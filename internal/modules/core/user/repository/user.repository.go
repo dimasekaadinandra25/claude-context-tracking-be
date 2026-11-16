@@ -82,6 +82,22 @@ func (r *UserRepository) AssignRoleTx(ctx context.Context, tx pgx.Tx, userID, ro
 
 // BeginTx exposes the underlying pool's transaction starter to higher layers
 // (e.g. UserService) that need to coordinate cross-repository writes.
+func (r *UserRepository) SetRole(ctx context.Context, userID, roleID string, managed []string, actorID string) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `DELETE FROM core.user_roles WHERE user_id = $1 AND role_id = ANY($2::uuid[])`, userID, managed); err != nil {
+		logger.Error("Failed to clear user roles", logger.Err(err))
+		return err
+	}
+	if err := r.AssignRoleTx(ctx, tx, userID, roleID, actorID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 func (r *UserRepository) BeginTx(ctx context.Context) (pgx.Tx, error) {
 	return r.db.Begin(ctx)
 }

@@ -51,6 +51,10 @@ type UserResponse struct {
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
+type SetRoleRequest struct {
+	Role string `json:"role" binding:"required,oneof=member usage_viewer super_admin"`
+}
+
 type ResetPasswordRequest struct {
 	Password string `json:"password" binding:"required,min=8"`
 }

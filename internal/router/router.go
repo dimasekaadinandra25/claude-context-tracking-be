@@ -7,6 +7,7 @@ import (
 
 	// Core modules
 	"claude-usage-server/internal/modules/core/api_key"
+	"claude-usage-server/internal/modules/core/audit"
 	"claude-usage-server/internal/modules/core/auth"
 	"claude-usage-server/internal/modules/core/role"
 	"claude-usage-server/internal/modules/core/user"
@@ -51,9 +52,13 @@ func Setup(router *gin.Engine, db *pgxpool.Pool) {
 		})
 	})
 
+	auditModule := audit.Initialize(db)
+
 	// Core v1 routes
 	coreV1 := router.Group("/core/v1")
 	{
+		auditModule.SetupRoutes(coreV1)
+
 		roleModule := role.Initialize(db)
 		roleModule.SetupRoutes(coreV1)
 
@@ -62,18 +67,23 @@ func Setup(router *gin.Engine, db *pgxpool.Pool) {
 
 		authModule := auth.Initialize(db, roleModule.Repository, authzService)
 		authModule.SetupRoutes(coreV1)
+		authModule.Handler.SetAuditor(auditModule.Service)
 
 		userModule := user.Initialize(db)
 		userModule.SetupRoutes(coreV1)
 		middleware.SetUserValidator(userModule.Service)
+		userModule.Handler.SetAuditor(auditModule.Service)
 
 		apiKeyModule := api_key.Initialize(db, roleModule.Repository)
 		apiKeyModule.SetupRoutes(coreV1)
 		middleware.SetApiKeyValidator(apiKeyModule.Service)
 		userModule.Service.SetKeyRevoker(apiKeyModule.Service)
+		apiKeyModule.Handler.SetAuditor(auditModule.Service)
 	}
 
-	usage.Initialize(db).SetupRoutes(router.Group("/usage/v1"))
+	usageModule := usage.Initialize(db)
+	usageModule.Handler.SetAuditor(auditModule.Service)
+	usageModule.SetupRoutes(router.Group("/usage/v1"))
 
 	log.Info("Routes setup completed", zap.Int("routes", len(router.Routes())))
 }

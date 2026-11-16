@@ -34,6 +34,6 @@ See `.env.example`. The ones the server needs:
 |----------|-------|
 | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSLMODE` | Postgres connection |
 | `JWT_SECRET` | At least 32 characters |
-| `JWT_EXPIRATION`, `JWT_REFRESH_EXPIRATION` | Default `24h`, `168h` |
+| `JWT_EXPIRATION`, `JWT_REFRESH_EXPIRATION` | Default `1h`, `168h`. A short access token makes role changes take effect within the hour; the dashboard refreshes it silently |
 | `SERVER_HOST`, `SERVER_PORT` | Default `127.0.0.1`, `8080` |
 | `TZ` | Must be `UTC` |

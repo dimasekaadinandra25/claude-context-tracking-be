@@ -36,7 +36,7 @@ services:
       PGPASSWORD: ${DB_PASSWORD:-postgres}
       PGDATABASE: claude_usage
       TZ: UTC
-    volumes: ["./backups:/backups"]
+    volumes: ["./backups:/backups", "./deployments/backup:/scripts:ro"]
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -49,6 +49,7 @@ services:
             if pg_dump --clean --if-exists | gzip > "$$f.tmp"; then
               mv "$$f.tmp" "$$f"
               echo "backup written: $$f"
+              sh /scripts/verify.sh "$$f"
               find /backups -name 'claude_usage-*.sql.gz' -mmin +20160 -delete
             else
               rm -f "$$f.tmp"

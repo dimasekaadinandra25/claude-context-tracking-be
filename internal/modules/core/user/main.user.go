@@ -47,4 +47,5 @@ func (m *UserModule) SetupRoutes(router *gin.RouterGroup) {
 	admin.POST("/:id/deactivate", m.Handler.Deactivate)
 	admin.POST("/:id/activate", m.Handler.Activate)
 	admin.POST("/:id/reset-password", m.Handler.ResetPassword)
+	admin.PUT("/:id/role", m.Handler.SetRole)
 }

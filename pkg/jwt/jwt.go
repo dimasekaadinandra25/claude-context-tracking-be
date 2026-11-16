@@ -41,12 +41,12 @@ func GetSecret() []byte {
 func GetExpirationTime() time.Duration {
 	expStr := os.Getenv("JWT_EXPIRATION")
 	if expStr == "" {
-		return 24 * time.Hour // Default 24 hours
+		return time.Hour
 	}
 
 	duration, err := time.ParseDuration(expStr)
 	if err != nil {
-		return 24 * time.Hour // Fallback to 24 hours
+		return time.Hour
 	}
 
 	return duration

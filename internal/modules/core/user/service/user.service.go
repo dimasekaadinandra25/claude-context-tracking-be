@@ -20,9 +20,17 @@ var (
 	ErrUsernameAlreadyExists = errors.New("username already exists")
 	ErrInvalidPassword       = errors.New("invalid password")
 	ErrDeactivateSelf        = errors.New("cannot deactivate yourself")
+	ErrChangeOwnRole         = errors.New("cannot change your own role")
+	ErrInvalidRole           = errors.New("invalid role")
 )
 
 const memberRoleID = "00000000-0000-0000-0000-000000000003"
+
+var managedRoles = map[string]string{
+	"super_admin":  "00000000-0000-0000-0000-000000000001",
+	"member":       memberRoleID,
+	"usage_viewer": "00000000-0000-0000-0000-000000000004",
+}
 
 type KeyRevoker interface {
 	RevokeAllForUser(ctx context.Context, actorID, userID, reason string) error
@@ -181,6 +189,32 @@ func (s *UserService) SetActive(ctx context.Context, actorID, id string, active 
 		return nil
 	}
 	return s.keyRevoker.RevokeAllForUser(ctx, actorID, id, "user deactivated")
+}
+
+func (s *UserService) SetRole(ctx context.Context, actorID, id, role string) ([]string, error) {
+	roleID, ok := managedRoles[role]
+	if !ok {
+		return nil, ErrInvalidRole
+	}
+	if id == actorID {
+		return nil, ErrChangeOwnRole
+	}
+	user, err := s.userRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, ErrUserNotFound
+	}
+	codes, err := s.userRepo.RoleCodes(ctx, []string{id})
+	if err != nil {
+		return nil, err
+	}
+	managed := make([]string, 0, len(managedRoles))
+	for _, roleID := range managedRoles {
+		managed = append(managed, roleID)
+	}
+	return codes[id], s.userRepo.SetRole(ctx, id, roleID, managed, actorID)
 }
 
 func (s *UserService) ResetPassword(ctx context.Context, actorID, id, password string) error {
