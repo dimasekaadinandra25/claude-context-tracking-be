@@ -32,7 +32,7 @@ func Initialize(db *pgxpool.Pool) *RoleModule {
 // SetupRoutes registers all role module routes
 func (m *RoleModule) SetupRoutes(router *gin.RouterGroup) {
 	roles := router.Group("/roles")
-	roles.Use(middleware.JWTAuth())
+	roles.Use(middleware.JWTAuth(), middleware.RejectApiKey())
 	{
 		roles.GET("", m.Handler.GetAll)
 		roles.GET("/:id", m.Handler.GetByID)
