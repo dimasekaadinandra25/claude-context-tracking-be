@@ -424,3 +424,14 @@ func TestViewerReadsEveryoneButChangesNothing(t *testing.T) {
 		t.Fatalf("viewer must not set budgets, got %v", err)
 	}
 }
+
+func TestReportRangeIsAtMost400Days(t *testing.T) {
+	s := &Service{}
+	to := at("2026-11-01T00:00:00Z")
+	if _, _, err := s.prepare(dto.Caller{IsAdmin: true}, dto.ReportQuery{From: to.Add(-400 * 24 * time.Hour), To: to}); err != nil {
+		t.Fatalf("400 days: %v", err)
+	}
+	if _, _, err := s.prepare(dto.Caller{IsAdmin: true}, dto.ReportQuery{From: to.Add(-401 * 24 * time.Hour), To: to}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("401 days: err = %v, want ErrInvalidInput", err)
+	}
+}

@@ -88,7 +88,10 @@ const upsertClaudeAccount = `
 	INSERT INTO usage.claude_accounts (user_id, email, plan, tier, updated_at)
 	VALUES ($1, $2, $3, $4, NOW())
 	ON CONFLICT (user_id) DO UPDATE SET
-		email = EXCLUDED.email, plan = EXCLUDED.plan, tier = EXCLUDED.tier, updated_at = NOW()`
+		email = COALESCE(NULLIF(EXCLUDED.email, ''), usage.claude_accounts.email),
+		plan = COALESCE(NULLIF(EXCLUDED.plan, ''), usage.claude_accounts.plan),
+		tier = COALESCE(NULLIF(EXCLUDED.tier, ''), usage.claude_accounts.tier),
+		updated_at = NOW()`
 
 func planWindow(w *domain.PlanWindow) (*float64, *time.Time) {
 	if w == nil {
@@ -213,7 +216,8 @@ func (r *Repository) AccountWeek(ctx context.Context, userID string) (week Accou
 			ORDER BY p.captured_at DESC LIMIT 1
 		)
 		SELECT l.seven_day_used,
-		       COALESCE((SELECT MAX(NULLIF(ca.tier, '')) FROM usage.claude_accounts ca WHERE ca.user_id IN (SELECT id FROM members)), ''),
+		       COALESCE((SELECT ca.tier FROM usage.claude_accounts ca WHERE ca.user_id IN (SELECT id FROM members) AND ca.tier <> ''
+		                 ORDER BY ca.updated_at DESC LIMIT 1), ''),
 		       COALESCE((SELECT SUM(h.input_tokens + h.cache_write_tokens + h.cache_read_tokens + 5 * (h.output_tokens + h.subagent_output_tokens))
 		                 FROM usage.session_hours h
 		                 WHERE h.user_id IN (SELECT id FROM members) AND h.hour >= l.seven_day_resets_at - INTERVAL '7 days'), 0)::bigint,

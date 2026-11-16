@@ -187,7 +187,7 @@ POST /usage/v1/sessions
 | `hours[].cache_write_tokens` | int | No | Cache write (creation) tokens, ≥ 0. Missing = 0 |
 | `hours[].cache_read_tokens` | int | No | Cache read tokens, ≥ 0. Missing = 0 |
 | `plan_limits` | object | No | The member's Claude plan usage from Claude's usage endpoint or the status line: `five_hour` and `seven_day`, each `{ "used_percentage": 0-100, "resets_at": unix seconds }` and optional, `models`, an optional list of single-model weekly limits `{ "name": "Fable", "used_percentage": 0-100, "resets_at": unix seconds }` (at most 20; an invalid entry is dropped on its own), plus `captured_at` (unix seconds). The newest `captured_at` wins per member. Invalid values are ignored and never fail the sync |
-| `account` | object | No | The Claude account signed in to Claude Code: `email` (max 320), `plan` and `tier` (max 100 each, e.g. `default_claude_max_20x`). Ignored when invalid or when both `email` and `tier` are empty |
+| `account` | object | No | The Claude account signed in to Claude Code: `email` (max 320), `plan` and `tier` (max 100 each, e.g. `default_claude_max_20x`). Ignored when invalid or when both `email` and `tier` are empty. An empty `email`, `plan` or `tier` keeps the stored one |
 | `sessions[].tools` | array | No | Activity per whole UTC hour and tool: `hour`, `tool` (1-100 characters), `calls`, `lines_added`, `lines_removed`, `commits`, each number ≥ 0. Stored in `usage.session_tool_hours`. Counts only, never commands, code or file names |
 | `sessions[].overhead` | object | No | Fixed context overhead of the session: `system_tokens`, `memory_tokens`, `agents_tokens`, `skills_tokens`, each an int ≥ 0 (missing key = 0). Stored on `usage.sessions` (`overhead_*_tokens`). Sent values replace the stored ones; omitting `overhead` leaves them unchanged |
 
@@ -254,7 +254,7 @@ Reports 2-5 and 20 accept these query parameters:
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `from` | RFC 3339 | `to` minus 7 days | Inclusive |
-| `to` | RFC 3339 | now | Exclusive; `from` must be before `to` |
+| `to` | RFC 3339 | now | Exclusive; `from` must be before `to` and at most 400 days earlier, otherwise 400 |
 | `tz` | IANA name | `Asia/Jakarta` | Used for day buckets. Unknown names return 400 |
 | `user_id` | UUID | none (everyone) | **Admins only.** For members it is ignored and forced to their own ID |
 
@@ -522,7 +522,7 @@ Takes the report parameters. Returns one row per member and local day in the ran
 ]
 ```
 
-`requests` and `output_tokens` include subagent requests and their output. `seven_day_used` is the last 7-day reading of that day and `limit_used` the percentage points of the 7-day limit used that day, summed between readings and restarting when the window resets. Both are `null` on days without a reading. Members whose apps report the same Claude account email (case-insensitive) share one account: their readings are merged into one timeline, so `seven_day_used` and `limit_used` are the account's, every member of the account gets a row on days the account was used, `account_weight` is the account's input + cache + 5 × output that day and `account_members` how many members share it (1 for a member on their own account). Overview `five_hour_used`, `seven_day_used` and their reset times are likewise the newest reading from anyone on the account. Members only see their own rows.
+`requests` and `output_tokens` include subagent requests and their output. `seven_day_used` is the last 7-day reading of that day and `limit_used` the percentage points of the 7-day limit used that day, summed between readings (a reading only counts what it adds above the highest earlier reading of the window) and restarting when the window resets. Both are `null` on days without a reading. Members whose apps report the same Claude account email (case-insensitive) share one account: their readings are merged into one timeline, so `seven_day_used` and `limit_used` are the account's, every member of the account gets a row on days the account was used, `account_weight` is the account's input + cache + 5 × output that day and `account_members` how many active members share it (1 for a member on their own account; deactivated members keep their rows but are not counted). Overview `five_hour_used`, `seven_day_used` and their reset times are likewise the newest reading from anyone on the account. Members only see their own rows.
 
 ---
 
@@ -615,7 +615,7 @@ Sessions that used at least `min_share` percent (default 5, between 0 and 100) o
 GET /usage/v1/costs?from=2026-11-01T00:00:00+07:00&to=2026-12-01T00:00:00+07:00&tz=Asia/Jakarta
 ```
 
-One row per member and project in the range with `input_tokens`, `cache_write_tokens`, `cache_read_tokens`, `output_tokens` (including subagents), `requests`, `weight` and `cost`. `cost` splits the account's monthly plan price ($200, $100 or $20 by tier) by each row's share of every account member's weighted tokens in the range, so a calendar month adds up to the plan price. `claude_email` and `claude_tier` are the member's Claude account (`null` when never sent). Members only get their own rows; the split still uses the whole account.
+One row per member and project in the range with `input_tokens`, `cache_write_tokens`, `cache_read_tokens`, `output_tokens` (including subagents), `requests`, `weight` and `cost`. `cost` splits the account's monthly plan price ($200, $100 or $20 by tier) by each row's share of every account member's weighted tokens in the range, so a calendar month adds up to the plan price. `claude_email` is the member's Claude account and `claude_tier` the tier most recently sent by any member of that account (`null` when never sent). Members only get their own rows; the split still uses the whole account.
 
 ### 5. Session List
 

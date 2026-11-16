@@ -189,6 +189,8 @@ test('a project passing the share of the week is reported once per window, not o
     `Project web has used 40% of the team's Claude tokens this week (alert at 40%).`,
   ]);
   assert.deepEqual(projectShares(projects, 40, window, now, first.state).alerts, []);
+  assert.deepEqual(projectShares(projects, 40, window + 400, now, first.state).alerts, []);
+  assert.deepEqual(projectShares(projects, 40, window - 400, now, first.state).alerts, []);
   assert.equal(projectShares(projects, 40, now + 5 * DAY, now, first.state).alerts.length, 2);
   assert.deepEqual(projectShares(projects, 40, now + 6.5 * DAY, now, undefined).alerts, []);
   assert.deepEqual(projectShares(projects.slice(0, 2), 40, window, now, undefined).alerts, []);

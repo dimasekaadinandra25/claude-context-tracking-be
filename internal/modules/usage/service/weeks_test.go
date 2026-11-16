@@ -174,3 +174,47 @@ func TestHotSessionsFiveHourShareAndCostSplitUseTheWholeAccount(t *testing.T) {
 		t.Fatalf("member costs = %+v %v", own, err)
 	}
 }
+
+func TestAccountTierIsTheMostRecentlyReportedOne(t *testing.T) {
+	pool := testdb.Open(t)
+	ctx := context.Background()
+	owner := testdb.User(t, pool, "owner@test.local", false)
+	guest := testdb.User(t, pool, "guest@test.local", false)
+	svc := New(repository.New(pool))
+	now := time.Now().UTC().Truncate(time.Hour)
+	for _, u := range []struct{ id, tier string }{{guest, "default_claude_max_5x"}, {owner, "default_claude_max_20x"}} {
+		account := json.RawMessage(`{"email":"team@claude.test","tier":"` + u.tier + `"}`)
+		if _, err := svc.Ingest(ctx, u.id, dto.IngestRequest{Machine: "PC", Account: account, Sessions: encode(withHours(u.id[:8],
+			dto.HourPayload{Hour: now.Add(-2 * time.Hour), Model: "m", Requests: 1, CacheReadTokens: 1_000_000}))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := svc.Ingest(ctx, owner, dto.IngestRequest{Machine: "PC", PlanLimits: weekly(t, 20, now.Add(72*time.Hour), now)}); err != nil {
+		t.Fatal(err)
+	}
+	q := dto.ReportQuery{From: now.Add(-24 * time.Hour), To: now.Add(time.Hour), TZ: "UTC"}
+	want := "default_claude_max_20x"
+
+	weeks, err := svc.Weeks(ctx, dto.Caller{IsAdmin: true}, q)
+	if err != nil || len(weeks) == 0 {
+		t.Fatalf("weeks = %+v err = %v", weeks, err)
+	}
+	for _, w := range weeks {
+		if w.ClaudeTier == nil || *w.ClaudeTier != want {
+			t.Fatalf("weeks tier = %v, want %s", w.ClaudeTier, want)
+		}
+	}
+	costs, err := svc.Costs(ctx, dto.Caller{IsAdmin: true}, q)
+	if err != nil || len(costs) != 2 {
+		t.Fatalf("costs = %+v err = %v", costs, err)
+	}
+	for _, c := range costs {
+		if c.ClaudeTier == nil || *c.ClaudeTier != want {
+			t.Fatalf("costs tier = %v, want %s", c.ClaudeTier, want)
+		}
+	}
+	week, ok, err := repository.New(pool).AccountWeek(ctx, guest)
+	if err != nil || !ok || week.Tier != want {
+		t.Fatalf("account week = %+v %v %v, want %s", week, ok, err, want)
+	}
+}

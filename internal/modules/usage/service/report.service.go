@@ -16,6 +16,7 @@ import (
 const (
 	defaultTZ    = "Asia/Jakarta"
 	defaultRange = 7 * 24 * time.Hour
+	maxRange     = 400 * 24 * time.Hour
 	defaultSort  = "-last_request_at"
 )
 
@@ -62,6 +63,9 @@ func (s *Service) prepare(c dto.Caller, q dto.ReportQuery) (dto.ReportQuery, *ti
 	}
 	if !q.From.Before(q.To) {
 		return q, nil, fmt.Errorf("%w: from must be before to", ErrInvalidInput)
+	}
+	if q.To.Sub(q.From) > maxRange {
+		return q, nil, fmt.Errorf("%w: range must be at most 400 days", ErrInvalidInput)
 	}
 	return q, loc, nil
 }

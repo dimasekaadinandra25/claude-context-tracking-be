@@ -273,3 +273,96 @@ func TestMemberModelsSplitUsagePerMemberAndModelAndHideOthersFromMembers(t *test
 		t.Fatalf("member saw others: %+v", own)
 	}
 }
+
+func TestDailyCountsOnlyActiveMembersOfTheAccount(t *testing.T) {
+	pool := testdb.Open(t)
+	ctx := context.Background()
+	owner := testdb.User(t, pool, "owner@test.local", false)
+	guest := testdb.User(t, pool, "guest@test.local", false)
+	svc := New(repository.New(pool))
+	account := json.RawMessage(`{"email":"team@claude.test","tier":"default_claude_max_20x"}`)
+	now := time.Now().UTC().Truncate(time.Hour)
+	for _, user := range []string{owner, guest} {
+		if _, err := svc.Ingest(ctx, user, dto.IngestRequest{Machine: "PC", Account: account, Sessions: encode(withHours(user[:8],
+			dto.HourPayload{Hour: now.Add(-2 * time.Hour), Model: "m", Requests: 1, InputTokens: 100}))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := svc.Ingest(ctx, owner, dto.IngestRequest{Machine: "PC", PlanLimits: weekly(t, 20, now.Add(72*time.Hour), now)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE core.users SET is_active = FALSE WHERE id = $1`, guest); err != nil {
+		t.Fatal(err)
+	}
+
+	days, err := svc.Daily(ctx, dto.Caller{UserID: owner}, dto.ReportQuery{From: now.Add(-24 * time.Hour), To: now, TZ: "UTC"})
+	if err != nil || len(days) == 0 {
+		t.Fatalf("days = %+v err = %v", days, err)
+	}
+	rates, err := svc.WeekRates(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range days {
+		if d.AccountMembers != 1 || int(d.AccountMembers) != rates.Members {
+			t.Fatalf("daily members = %d, app members = %d, want 1 for both", d.AccountMembers, rates.Members)
+		}
+	}
+}
+
+func TestEmptyAccountFieldsKeepTheStoredOnes(t *testing.T) {
+	pool := testdb.Open(t)
+	ctx := context.Background()
+	a := testdb.User(t, pool, "a@test.local", false)
+	svc := New(repository.New(pool))
+	for _, raw := range []string{
+		`{"email":"me@claude.test","plan":"Max","tier":"default_claude_max_20x"}`,
+		`{"email":"","plan":"","tier":"default_claude_max_5x"}`,
+		`{"email":"me@claude.test","plan":"","tier":""}`,
+	} {
+		if _, err := svc.Ingest(ctx, a, dto.IngestRequest{Machine: "PC", Account: json.RawMessage(raw)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var email, plan, tier string
+	if err := pool.QueryRow(ctx, `SELECT email, plan, tier FROM usage.claude_accounts WHERE user_id = $1`, a).Scan(&email, &plan, &tier); err != nil {
+		t.Fatal(err)
+	}
+	if email != "me@claude.test" || plan != "Max" || tier != "default_claude_max_5x" {
+		t.Fatalf("account = %q %q %q", email, plan, tier)
+	}
+}
+
+func TestInterleavedReadingsOfTwoMembersAreNotDoubleCounted(t *testing.T) {
+	pool := testdb.Open(t)
+	ctx := context.Background()
+	owner := testdb.User(t, pool, "owner@test.local", false)
+	guest := testdb.User(t, pool, "guest@test.local", false)
+	svc := New(repository.New(pool))
+	account := json.RawMessage(`{"email":"team@claude.test","tier":"default_claude_max_20x"}`)
+	window := at("2026-11-02T09:00:00Z")
+	for _, r := range []struct {
+		user string
+		used float64
+		at   string
+	}{
+		{owner, 10, "2026-10-29T01:00:00Z"},
+		{guest, 15, "2026-10-29T02:00:00Z"},
+		{owner, 14, "2026-10-29T03:00:00Z"},
+		{owner, 16, "2026-10-29T04:00:00Z"},
+	} {
+		if _, err := svc.Ingest(ctx, r.user, dto.IngestRequest{Machine: "PC", Account: account, PlanLimits: weekly(t, r.used, window, at(r.at))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	days, err := svc.Daily(ctx, dto.Caller{IsAdmin: true}, week())
+	if err != nil || len(days) != 2 {
+		t.Fatalf("days = %+v err = %v", days, err)
+	}
+	for _, d := range days {
+		if d.LimitUsed == nil || *d.LimitUsed != 6 || *d.SevenDayUsed != 16 {
+			t.Fatalf("%s day = %+v, want limit used 6", d.UserID, d)
+		}
+	}
+}

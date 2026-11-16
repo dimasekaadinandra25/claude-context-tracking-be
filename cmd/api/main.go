@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"os"
 	"time"
 
 	"claude-usage-server/internal/config"
 	"claude-usage-server/internal/database"
+	authRepo "claude-usage-server/internal/modules/core/auth/repository"
 	"claude-usage-server/internal/router"
 	"claude-usage-server/pkg/jwt"
 	"claude-usage-server/pkg/keycrypt"
@@ -51,6 +53,8 @@ func main() {
 
 	logger.Info("Database connected successfully")
 
+	go pruneRefreshTokens(authRepo.NewRefreshTokenRepository(db.Pool))
+
 	// Initialize Gin router
 	ginRouter := gin.New() // Use gin.New() instead of gin.Default() since we use custom middleware
 	if err := ginRouter.SetTrustedProxies([]string{"127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}); err != nil {
@@ -66,5 +70,12 @@ func main() {
 
 	if err := ginRouter.Run(serverAddr); err != nil {
 		logger.Fatal("Failed to start server")
+	}
+}
+
+func pruneRefreshTokens(repo *authRepo.RefreshTokenRepository) {
+	for {
+		_ = repo.DeleteExpired(context.Background())
+		time.Sleep(time.Hour)
 	}
 }

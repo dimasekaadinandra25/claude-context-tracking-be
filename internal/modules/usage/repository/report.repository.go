@@ -18,7 +18,7 @@ const hourWeight = `(h.input_tokens + h.cache_write_tokens + h.cache_read_tokens
 const accounts = `
 	SELECT u.id AS user_id, COALESCE(NULLIF(u.full_name, ''), u.username) AS name,
 	       NULLIF(ca.email, '') AS email, NULLIF(ca.tier, '') AS tier,
-	       COALESCE(NULLIF(LOWER(ca.email), ''), u.id::text) AS account
+	       COALESCE(NULLIF(LOWER(ca.email), ''), u.id::text) AS account, ca.updated_at
 	FROM core.users u LEFT JOIN usage.claude_accounts ca ON ca.user_id = u.id
 	WHERE u.deleted_at IS NULL`
 
@@ -110,7 +110,8 @@ func (r *Repository) Overview(ctx context.Context, q dto.ReportQuery) ([]dto.Per
 			       COUNT(*) FILTER (WHERE `+nearFull+`) AS near_full,
 			       SUM(compactions)::bigint AS compactions
 			FROM usage.sessions s
-			WHERE ($3::uuid IS NULL OR user_id = $3::uuid) AND EXISTS (
+			WHERE ($3::uuid IS NULL OR user_id = $3::uuid)
+			  AND s.last_request_at >= $1 AND s.first_request_at < $2::timestamptz + INTERVAL '1 hour' AND EXISTS (
 				SELECT 1 FROM usage.session_hours h WHERE h.session_id = s.id AND h.hour >= $1 AND h.hour < $2)
 			GROUP BY user_id
 		), t AS (
@@ -280,7 +281,8 @@ func (r *Repository) Tools(ctx context.Context, q dto.ReportQuery) ([]dto.ToolSu
 func (r *Repository) Daily(ctx context.Context, q dto.ReportQuery) ([]dto.DailyUsage, error) {
 	rows, err := r.db.Query(ctx, `
 		WITH accounts AS (
-			SELECT u.id AS user_id, COALESCE(NULLIF(LOWER(ca.email), ''), u.id::text) AS account
+			SELECT u.id AS user_id, COALESCE(NULLIF(LOWER(ca.email), ''), u.id::text) AS account,
+			       COALESCE(u.is_active, FALSE) AS active
 			FROM core.users u
 			LEFT JOIN usage.claude_accounts ca ON ca.user_id = u.id
 			WHERE u.deleted_at IS NULL
@@ -300,19 +302,19 @@ func (r *Repository) Daily(ctx context.Context, q dto.ReportQuery) ([]dto.DailyU
 			GROUP BY 1, 2, 3
 		), readings AS (
 			SELECT a.account, r.captured_at, r.seven_day_used, r.seven_day_resets_at,
-			       LAG(r.seven_day_used) OVER w AS previous_used,
-			       LAG(r.seven_day_resets_at) OVER w AS previous_resets_at
+			       MAX(r.seven_day_used) OVER (
+			           PARTITION BY a.account, date_trunc('hour', r.seven_day_resets_at + INTERVAL '30 minutes')
+			           ORDER BY r.captured_at ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS previous_used,
+			       LAG(r.seven_day_resets_at) OVER (PARTITION BY a.account ORDER BY r.captured_at) AS previous_resets_at
 			FROM usage.plan_limit_readings r
 			JOIN accounts a ON a.user_id = r.user_id
 			WHERE r.captured_at >= $1::timestamptz - INTERVAL '8 days' AND r.captured_at < $2
 			  AND r.seven_day_used IS NOT NULL AND a.account IN (SELECT account FROM scope)
-			WINDOW w AS (PARTITION BY a.account ORDER BY r.captured_at)
 		), limits AS (
 			SELECT account, (captured_at AT TIME ZONE $3)::date AS day,
 			       (ARRAY_AGG(seven_day_used ORDER BY captured_at DESC))[1] AS seven_day_used,
 			       SUM(CASE
-			           WHEN ABS(EXTRACT(EPOCH FROM seven_day_resets_at - previous_resets_at)) < 3600
-			           THEN GREATEST(0, seven_day_used - previous_used)
+			           WHEN previous_used IS NOT NULL THEN GREATEST(0, seven_day_used - previous_used)
 			           WHEN previous_resets_at IS NOT NULL OR captured_at < seven_day_resets_at - INTERVAL '6 days'
 			           THEN seven_day_used END) AS limit_used
 			FROM readings
@@ -320,7 +322,7 @@ func (r *Repository) Daily(ctx context.Context, q dto.ReportQuery) ([]dto.DailyU
 		), account_days AS (
 			SELECT account, day, SUM(weight)::bigint AS weight FROM tokens GROUP BY 1, 2
 		), members AS (
-			SELECT account, COUNT(*)::int AS members FROM accounts GROUP BY account
+			SELECT account, (COUNT(*) FILTER (WHERE active))::int AS members FROM accounts GROUP BY account
 		), member_days AS (
 			SELECT a.user_id, a.account, d.day
 			FROM accounts a
@@ -354,7 +356,7 @@ func (r *Repository) Weeks(ctx context.Context, q dto.ReportQuery) ([]dto.WeekUs
 	rows, err := r.db.Query(ctx, `
 		WITH accounts AS (
 			SELECT u.id AS user_id, COALESCE(u.full_name, '') AS full_name,
-			       COALESCE(NULLIF(LOWER(ca.email), ''), u.id::text) AS account, NULLIF(ca.tier, '') AS tier
+			       COALESCE(NULLIF(LOWER(ca.email), ''), u.id::text) AS account, NULLIF(ca.tier, '') AS tier, ca.updated_at
 			FROM core.users u
 			LEFT JOIN usage.claude_accounts ca ON ca.user_id = u.id
 			WHERE u.deleted_at IS NULL
@@ -367,6 +369,7 @@ func (r *Repository) Weeks(ctx context.Context, q dto.ReportQuery) ([]dto.WeekUs
 			JOIN accounts a ON a.user_id = r.user_id
 			WHERE r.seven_day_used IS NOT NULL AND r.seven_day_resets_at IS NOT NULL
 			  AND a.account IN (SELECT account FROM scope)
+			  AND r.captured_at >= $1::timestamptz - INTERVAL '8 days'
 			  AND r.seven_day_resets_at > $1 AND r.seven_day_resets_at - INTERVAL '7 days' < $2
 			GROUP BY 1, 2
 		), hours AS (
@@ -390,7 +393,7 @@ func (r *Repository) Weeks(ctx context.Context, q dto.ReportQuery) ([]dto.WeekUs
 			ORDER BY account, resets_at, SUM(input_tokens + 5 * output_tokens) DESC
 		)
 		SELECT w.account, CASE WHEN w.account LIKE '%@%' THEN w.account END,
-		       (SELECT MAX(tier) FROM accounts a WHERE a.account = w.account),
+		       (SELECT a.tier FROM accounts a WHERE a.account = w.account AND a.tier IS NOT NULL ORDER BY a.updated_at DESC LIMIT 1),
 		       w.resets_at, w.used, tm.model, m.user_id::text, COALESCE(a.full_name, ''),
 		       COALESCE(m.input_tokens, 0), COALESCE(m.output_tokens, 0), COALESCE(m.requests, 0), COALESCE(m.weight, 0)
 		FROM windows w
@@ -427,6 +430,7 @@ func (r *Repository) Sessions(ctx context.Context, q dto.SessionQuery, limit, of
 			WHERE h.session_id = s.id AND h.hour >= $1 AND h.hour < $2
 		) g ON g.new_context > 0 OR g.output_tokens > 0 OR g.subagent_requests > 0
 		WHERE u.deleted_at IS NULL
+		  AND s.last_request_at >= $1 AND s.first_request_at < $2::timestamptz + INTERVAL '1 hour'
 		  AND ($3::uuid IS NULL OR s.user_id = $3::uuid)
 		  AND ($4 = '' OR s.project = $4)
 		  AND ($5 = '' OR s.model = $5 OR EXISTS (
@@ -596,7 +600,7 @@ func (r *Repository) Costs(ctx context.Context, q dto.ReportQuery) ([]dto.CostRo
 		), priced AS (
 			SELECT a.user_id, a.name, a.email, used.project, used.input_tokens, used.cache_write_tokens,
 			       used.cache_read_tokens, used.output_tokens, used.requests, used.weight,
-			       MAX(a.tier) OVER (PARTITION BY a.account) AS tier,
+			       (SELECT t.tier FROM a t WHERE t.account = a.account AND t.tier IS NOT NULL ORDER BY t.updated_at DESC LIMIT 1) AS tier,
 			       SUM(used.weight) OVER (PARTITION BY a.account)::bigint AS account_weight
 			FROM used JOIN a ON a.user_id = used.user_id
 		)

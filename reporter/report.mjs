@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
 import {
@@ -115,12 +115,20 @@ async function loadState() {
   }
 }
 
-async function saveState(state) {
-  try {
-    await writeFile(STATE_FILE, JSON.stringify(state));
-  } catch (error) {
-    log(`could not save ${STATE_FILE}: ${error.message}`);
-  }
+let saving = Promise.resolve();
+
+function saveState(state) {
+  const text = JSON.stringify(state);
+  const temp = `${STATE_FILE}.tmp`;
+  saving = saving.then(async () => {
+    try {
+      await writeFile(temp, text);
+      await rename(temp, STATE_FILE);
+    } catch (error) {
+      log(`could not save ${STATE_FILE}: ${error.message}`);
+    }
+  });
+  return saving;
 }
 
 async function send(hooks, build) {
@@ -343,8 +351,18 @@ async function main() {
 
   if (!anyRule(rules)) return;
   log(`checking limits every ${ALERT_CHECK_MS / 60_000} min for ${ALERTS}`);
-  const alertTick = () =>
-    checkAlerts(hooks, rules, state).catch((error) => log(`limit check failed: ${error.message}`));
+  let alerting = false;
+  const alertTick = async () => {
+    if (alerting) return;
+    alerting = true;
+    try {
+      await checkAlerts(hooks, rules, state);
+    } catch (error) {
+      log(`limit check failed: ${error.message}`);
+    } finally {
+      alerting = false;
+    }
+  };
   alertTick();
   setInterval(alertTick, ALERT_CHECK_MS);
 }

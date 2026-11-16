@@ -169,7 +169,7 @@ export function runawaySessions(hot, now, previous = {}, link = '') {
 }
 
 export function projectShares(projects, threshold, window, now, previous, link = '') {
-  const sent = previous?.window === window ? previous.sent : [];
+  const sent = previous && sameWindow(previous.window, window) ? previous.sent : [];
   const state = { window, sent: [...sent] };
   const weighed = projects
     .map((project) => ({ key: project.project, name: project.project || 'Private', weight: projectWeight(project) }))
