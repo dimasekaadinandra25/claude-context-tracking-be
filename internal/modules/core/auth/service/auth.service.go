@@ -337,6 +337,7 @@ func (s *AuthService) GetMe(ctx context.Context, userID string, isSuperAdmin boo
 		Roles:        roles,
 		Permissions:  permissions,
 		IsSuperAdmin: isSuperAdmin,
+		CanViewAll:   isSuperAdmin || slices.Contains(roles, jwt.RoleUsageViewer),
 	}, nil
 }
 

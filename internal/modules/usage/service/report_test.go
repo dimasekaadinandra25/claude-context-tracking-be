@@ -381,3 +381,46 @@ func TestReportsSkipDeletedUsers(t *testing.T) {
 		t.Fatalf("sessions total=%d rows=%+v, want only a1", total, rows)
 	}
 }
+
+func TestViewerReadsEveryoneButChangesNothing(t *testing.T) {
+	pool := testdb.Open(t)
+	ctx := context.Background()
+	a := testdb.User(t, pool, "a@test.local", false)
+	b := testdb.User(t, pool, "b@test.local", false)
+	viewer := testdb.User(t, pool, "viewer@test.local", false)
+	svc := New(repository.New(pool))
+	ingest(t, svc, b, payload("b1"))
+
+	caller := dto.Caller{UserID: viewer, ViewAll: true}
+	q := week()
+	q.UserID = b
+	ov, err := svc.Overview(ctx, caller, q)
+	if err != nil || len(ov.People) != 1 || ov.People[0].UserID != b || ov.TotalSessions != 1 {
+		t.Fatalf("viewer overview = %+v %v", ov, err)
+	}
+	if _, err := svc.Session(ctx, caller, "b1"); err != nil {
+		t.Fatalf("viewer must read any session: %v", err)
+	}
+	if _, err := svc.People(ctx, caller); err != nil {
+		t.Fatalf("viewer must list people: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO core.roles (id, code, name, description, permissions, is_system, is_active)
+		VALUES ('00000000-0000-0000-0000-000000000004', 'usage_viewer', 'Usage Viewer', '', '{}'::jsonb, TRUE, TRUE) ON CONFLICT DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE core.user_roles SET role_id = (SELECT id FROM core.roles WHERE code = 'usage_viewer') WHERE user_id = $1`, viewer); err != nil {
+		t.Fatal(err)
+	}
+	all, err := svc.Overview(ctx, caller, week())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range all.People {
+		if p.UserID == viewer {
+			t.Fatal("the viewer account must not be listed as a member")
+		}
+	}
+	if err := svc.SetBudget(ctx, caller, a, 1000); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("viewer must not set budgets, got %v", err)
+	}
+}

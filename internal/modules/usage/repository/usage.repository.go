@@ -191,7 +191,14 @@ func (r *Repository) SaveSession(ctx context.Context, s domain.Session, overhead
 	return true, tx.Commit(ctx)
 }
 
-func (r *Repository) AccountWeek(ctx context.Context, userID string) (used float64, tier string, weight int64, ok bool, err error) {
+type AccountWeek struct {
+	Used    float64
+	Tier    string
+	Weight  int64
+	Members int
+}
+
+func (r *Repository) AccountWeek(ctx context.Context, userID string) (week AccountWeek, ok bool, err error) {
 	err = r.db.QueryRow(ctx, `
 		WITH me AS (
 			SELECT COALESCE(NULLIF(LOWER(ca.email), ''), u.id::text) AS account
@@ -209,12 +216,13 @@ func (r *Repository) AccountWeek(ctx context.Context, userID string) (used float
 		       COALESCE((SELECT MAX(NULLIF(ca.tier, '')) FROM usage.claude_accounts ca WHERE ca.user_id IN (SELECT id FROM members)), ''),
 		       COALESCE((SELECT SUM(h.input_tokens + h.cache_write_tokens + h.cache_read_tokens + 5 * (h.output_tokens + h.subagent_output_tokens))
 		                 FROM usage.session_hours h
-		                 WHERE h.user_id IN (SELECT id FROM members) AND h.hour >= l.seven_day_resets_at - INTERVAL '7 days'), 0)::bigint
-		FROM latest l`, userID).Scan(&used, &tier, &weight)
+		                 WHERE h.user_id IN (SELECT id FROM members) AND h.hour >= l.seven_day_resets_at - INTERVAL '7 days'), 0)::bigint,
+		       (SELECT COUNT(*) FROM core.users u WHERE u.id IN (SELECT id FROM members) AND COALESCE(u.is_active, FALSE))::int
+		FROM latest l`, userID).Scan(&week.Used, &week.Tier, &week.Weight, &week.Members)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, "", 0, false, nil
+		return AccountWeek{}, false, nil
 	}
-	return used, tier, weight, err == nil, err
+	return week, err == nil, err
 }
 
 func (r *Repository) AppVersions(ctx context.Context) ([]string, error) {

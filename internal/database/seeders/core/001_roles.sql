@@ -16,5 +16,14 @@ INSERT INTO core.roles (id, code, name, description, permissions, is_system, is_
     '{"usage":"viewer"}'::jsonb,
     TRUE,
     TRUE
+),
+(
+    '00000000-0000-0000-0000-000000000004',
+    'usage_viewer',
+    'Usage Viewer',
+    'Reads every member''s usage, changes nothing. For the reporter.',
+    '{"usage":"viewer"}'::jsonb,
+    TRUE,
+    TRUE
 )
 ON CONFLICT DO NOTHING;

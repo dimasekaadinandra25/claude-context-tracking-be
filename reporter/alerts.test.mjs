@@ -169,11 +169,13 @@ test('a runaway session is reported once per hour and forgotten after a day', ()
   ]);
   assert.deepEqual(runawaySessions(hot, now, first.state).alerts, []);
   assert.deepEqual(runawaySessions([], now + 2 * DAY, first.state).state, {});
+  const linked = runawaySessions(hot, now, undefined, 'https://usage.example.com');
+  assert.match(linked.alerts[0], /within one hour\.\nhttps:\/\/usage\.example\.com\/dashboard\/sessions\/s1$/);
 });
 
 test('a project passing the share of the week is reported once per window, not on the first day', () => {
   const project = (name, input) => ({ project: name, input_tokens: input, cache_write_tokens: 0, cache_read_tokens: 0, output_tokens: 0 });
-  const projects = [project('api', 450), project('web', 400), project('', 150)];
+  const projects = [project('api', 450), project('web', 400), project('', 150), project('idle', 0)];
   const window = now + 3 * DAY;
   const first = projectShares(projects, 40, window, now, undefined);
   assert.deepEqual(first.alerts, [
@@ -183,6 +185,9 @@ test('a project passing the share of the week is reported once per window, not o
   assert.deepEqual(projectShares(projects, 40, window, now, first.state).alerts, []);
   assert.equal(projectShares(projects, 40, now + 5 * DAY, now, first.state).alerts.length, 2);
   assert.deepEqual(projectShares(projects, 40, now + 6.5 * DAY, now, undefined).alerts, []);
+  assert.deepEqual(projectShares(projects.slice(0, 2), 40, window, now, undefined).alerts, []);
+  const linked = projectShares(projects, 40, window, now, undefined, 'https://usage.example.com');
+  assert.match(linked.alerts[0], /\nhttps:\/\/usage\.example\.com\/dashboard\/sessions\?project=api$/);
 });
 
 test('daily message shows the 5-hour window with each member share and who is active now', () => {

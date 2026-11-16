@@ -14,4 +14,5 @@ type MeResponse struct {
 	// so FE can render admin-only UI without decoding the JWT. Super
 	// admins effectively bypass `permissions` on the backend.
 	IsSuperAdmin bool `json:"is_super_admin"`
+	CanViewAll   bool `json:"can_view_all"`
 }

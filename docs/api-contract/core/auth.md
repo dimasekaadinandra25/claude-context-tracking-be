@@ -66,6 +66,7 @@ Error:
 | `user_id` | string (UUID) | Also in `sub` |
 | `email`, `username`, `full_name` | string | Profile at sign-in time |
 | `is_super_admin` | bool | `true` for the `super_admin` role: sees everyone's usage, can use `/core/v1/admin` |
+| `can_view_all` | bool | `true` for `super_admin` and the read-only `usage_viewer` role: may read every member's usage. Only `super_admin` can change anything |
 | `roles` | string[] | Role codes: `super_admin` or `member` |
 | `exp`, `iat`, `nbf` | int64 | Unix timestamps |
 

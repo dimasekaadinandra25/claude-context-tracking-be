@@ -22,6 +22,10 @@ const accounts = `
 	FROM core.users u LEFT JOIN usage.claude_accounts ca ON ca.user_id = u.id
 	WHERE u.deleted_at IS NULL`
 
+const notViewer = `NOT EXISTS (
+	SELECT 1 FROM core.user_roles ur JOIN core.roles r ON r.id = ur.role_id
+	WHERE ur.user_id = u.id AND r.code = 'usage_viewer')`
+
 const nearFull = `s.context_window > 0 AND s.peak_context >= 0.8 * s.context_window`
 
 const overheadJSON = `CASE WHEN s.overhead_system_tokens IS NULL THEN NULL ELSE json_build_object(
@@ -164,7 +168,7 @@ func (r *Repository) Overview(ctx context.Context, q dto.ReportQuery) ([]dto.Per
 			SELECT a.last_used_at, a.app_version FROM core.api_keys a
 			WHERE a.user_id = u.id ORDER BY a.last_used_at DESC NULLS LAST LIMIT 1
 		) k ON TRUE
-		WHERE u.deleted_at IS NULL AND ($3::uuid IS NULL OR u.id = $3::uuid)
+		WHERE u.deleted_at IS NULL AND `+notViewer+` AND ($3::uuid IS NULL OR u.id = $3::uuid)
 		ORDER BY COALESCE(h.new_context, 0) DESC, u.email`,
 		q.From, q.To, userFilter(q.UserID))
 	if err != nil {

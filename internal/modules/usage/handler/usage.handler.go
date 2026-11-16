@@ -10,6 +10,7 @@ import (
 	"claude-usage-server/internal/modules/usage/dto"
 	"claude-usage-server/internal/modules/usage/service"
 	"claude-usage-server/internal/shared/response"
+	"claude-usage-server/pkg/jwt"
 	"claude-usage-server/pkg/logger"
 )
 
@@ -48,7 +49,9 @@ func (h *Handler) Ingest(c *gin.Context) {
 		res.LatestAppVersion, err = h.service.LatestAppVersion(c.Request.Context())
 	}
 	if err == nil && version != "" {
-		res.CostPerMillion, res.PercentPerMillion, err = h.service.WeekRates(c.Request.Context(), middleware.MustGetUserID(c))
+		var rates service.WeekRates
+		rates, err = h.service.WeekRates(c.Request.Context(), middleware.MustGetUserID(c))
+		res.CostPerMillion, res.PercentPerMillion, res.AccountMembers = rates.CostPerMillion, rates.PercentPerMillion, rates.Members
 	}
 	if err != nil {
 		logger.Error("Failed to save usage", logger.Err(err))
@@ -68,7 +71,11 @@ func caller(c *gin.Context) (dto.Caller, bool) {
 		response.Error(c, http.StatusForbidden, "Forbidden", "reports require a signed-in user, not an API key")
 		return dto.Caller{}, false
 	}
-	return dto.Caller{UserID: claims.UserID, IsAdmin: claims.IsSuperAdmin}, true
+	return dto.Caller{
+		UserID:  claims.UserID,
+		IsAdmin: claims.IsSuperAdmin,
+		ViewAll: claims.IsSuperAdmin || claims.HasRole(jwt.RoleUsageViewer),
+	}, true
 }
 
 func reportRequest[Q any](c *gin.Context) (dto.Caller, Q, bool) {

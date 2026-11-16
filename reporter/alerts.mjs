@@ -9,6 +9,7 @@ const RUNAWAY = 'runaway';
 const PROJECT = 'project';
 const WORDS = [PACE, SUMMARY, STALE, RUNAWAY, PROJECT];
 const ACTIVE_MS = 10 * 60_000;
+const MIN_PROJECTS = 3;
 const STALE_MS = 24 * HOUR_MS;
 const FULL = 100;
 
@@ -141,7 +142,9 @@ export function staleMembers(people, now, previous = {}) {
   return { state, alerts };
 }
 
-export function runawaySessions(hot, now, previous = {}) {
+const withLink = (text, url) => (url ? `${text}\n${url}` : text);
+
+export function runawaySessions(hot, now, previous = {}, link = '') {
   const state = Object.fromEntries(Object.entries(previous).filter(([, hour]) => now - Date.parse(hour) < DAY_MS));
   const alerts = [];
   for (const session of hot) {
@@ -150,24 +153,35 @@ export function runawaySessions(hot, now, previous = {}) {
     state[key] = session.hour;
     const what = [session.title, session.project].filter(Boolean).join(' in ') || session.session_id;
     alerts.push(
-      `Runaway session: ${session.full_name}'s "${what}" used ${session.share.toFixed(1)}% of the weekly limit within one hour.`
+      withLink(
+        `Runaway session: ${session.full_name}'s "${what}" used ${session.share.toFixed(1)}% of the weekly limit within one hour.`,
+        link && `${link}/dashboard/sessions/${encodeURIComponent(session.session_id)}`
+      )
     );
   }
   return { state, alerts };
 }
 
-export function projectShares(projects, threshold, window, now, previous) {
+export function projectShares(projects, threshold, window, now, previous, link = '') {
   const sent = previous?.window === window ? previous.sent : [];
   const state = { window, sent: [...sent] };
-  const weighed = projects.map((project) => ({ name: project.project || 'Private', weight: projectWeight(project) }));
+  const weighed = projects
+    .map((project) => ({ key: project.project, name: project.project || 'Private', weight: projectWeight(project) }))
+    .filter((project) => project.weight > 0);
   const total = weighed.reduce((sum, project) => sum + project.weight, 0);
-  if (total === 0 || now - (window - WEEK_MS) < DAY_MS) return { state, alerts: [] };
+  if (weighed.length < MIN_PROJECTS || now - (window - WEEK_MS) < DAY_MS) return { state, alerts: [] };
   const alerts = [];
   for (const project of weighed) {
     const share = (project.weight / total) * FULL;
     if (share < threshold || state.sent.includes(project.name)) continue;
     state.sent.push(project.name);
-    alerts.push(`Project ${project.name} has used ${Math.round(share)}% of the team's Claude tokens this week (alert at ${threshold}%).`);
+    const url = link && project.key && `${link}/dashboard/sessions?project=${encodeURIComponent(project.key)}`;
+    alerts.push(
+      withLink(
+        `Project ${project.name} has used ${Math.round(share)}% of the team's Claude tokens this week (alert at ${threshold}%).`,
+        url
+      )
+    );
   }
   return { state, alerts };
 }

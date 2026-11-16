@@ -26,7 +26,7 @@ var (
 )
 
 func (s *Service) scope(c dto.Caller, requested string) string {
-	if c.IsAdmin {
+	if c.IsAdmin || c.ViewAll {
 		return requested
 	}
 	return c.UserID
@@ -223,14 +223,14 @@ func (s *Service) Sessions(ctx context.Context, c dto.Caller, sq dto.SessionQuer
 
 func (s *Service) Session(ctx context.Context, c dto.Caller, id string) (dto.SessionDetail, error) {
 	detail, err := s.repo.Session(ctx, id)
-	if errors.Is(err, repository.ErrNoSession) || (err == nil && !c.IsAdmin && detail.Session.UserID != c.UserID) {
+	if errors.Is(err, repository.ErrNoSession) || (err == nil && !c.IsAdmin && !c.ViewAll && detail.Session.UserID != c.UserID) {
 		return dto.SessionDetail{}, ErrNotFound
 	}
 	return detail, err
 }
 
 func (s *Service) People(ctx context.Context, c dto.Caller) ([]dto.Person, error) {
-	if !c.IsAdmin {
+	if !c.IsAdmin && !c.ViewAll {
 		return nil, ErrForbidden
 	}
 	return s.repo.People(ctx)

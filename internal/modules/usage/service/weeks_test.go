@@ -87,13 +87,14 @@ func TestCostPerMillionUsesTheWholeAccountsCurrentWeek(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, who := range []string{owner, guest} {
-		rate, percent, err := svc.WeekRates(ctx, who)
-		if err != nil || rate < 0.99 || rate > 1.01 || percent < 2.16 || percent > 2.17 {
-			t.Fatalf("rates for %s = %v %v %v, want 1.00 and 2.17", who, rate, percent, err)
+		rates, err := svc.WeekRates(ctx, who)
+		if err != nil || rates.CostPerMillion < 0.99 || rates.CostPerMillion > 1.01 ||
+			rates.PercentPerMillion < 2.16 || rates.PercentPerMillion > 2.17 || rates.Members != 2 {
+			t.Fatalf("rates for %s = %+v %v, want 1.00, 2.17 and 2 members", who, rates, err)
 		}
 	}
-	if rate, percent, err := svc.WeekRates(ctx, loner); err != nil || rate != 0 || percent != 0 {
-		t.Fatalf("no reading must give no rate, got %v %v %v", rate, percent, err)
+	if rates, err := svc.WeekRates(ctx, loner); err != nil || rates != (WeekRates{}) {
+		t.Fatalf("no reading must give no rate, got %+v %v", rates, err)
 	}
 }
 

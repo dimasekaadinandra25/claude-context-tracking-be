@@ -173,12 +173,22 @@ func percentPerMillion(used float64, weight int64) float64 {
 	return used / float64(weight) * million
 }
 
-func (s *Service) WeekRates(ctx context.Context, userID string) (cost, percent float64, err error) {
-	used, tier, weight, ok, err := s.repo.AccountWeek(ctx, userID)
+type WeekRates struct {
+	CostPerMillion    float64
+	PercentPerMillion float64
+	Members           int
+}
+
+func (s *Service) WeekRates(ctx context.Context, userID string) (WeekRates, error) {
+	week, ok, err := s.repo.AccountWeek(ctx, userID)
 	if err != nil || !ok {
-		return 0, 0, err
+		return WeekRates{}, err
 	}
-	return costPerMillion(used, tier, weight), percentPerMillion(used, weight), nil
+	return WeekRates{
+		CostPerMillion:    costPerMillion(week.Used, week.Tier, week.Weight),
+		PercentPerMillion: percentPerMillion(week.Used, week.Weight),
+		Members:           week.Members,
+	}, nil
 }
 
 func (s *Service) LatestAppVersion(ctx context.Context) (string, error) {

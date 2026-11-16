@@ -18,7 +18,7 @@ func (r *Repository) Budgets(ctx context.Context, userID string, from, to time.T
 			SELECT SUM(new_context)::bigint AS used FROM usage.session_hours
 			WHERE user_id = u.id AND hour >= $1 AND hour < $2
 		) h ON TRUE
-		WHERE u.deleted_at IS NULL AND COALESCE(u.is_active, FALSE) AND ($3::uuid IS NULL OR u.id = $3::uuid)
+		WHERE u.deleted_at IS NULL AND COALESCE(u.is_active, FALSE) AND `+notViewer+` AND ($3::uuid IS NULL OR u.id = $3::uuid)
 		ORDER BY COALESCE(NULLIF(u.full_name, ''), u.email)`,
 		from, to, userFilter(userID))
 	if err != nil {

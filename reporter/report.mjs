@@ -26,7 +26,7 @@ const TIME_ZONE = env('REPORT_TZ', 'Asia/Jakarta');
 const THEME = env('REPORT_THEME', 'dark');
 const LOCALE = env('REPORT_LOCALE', 'en-US');
 const LANGUAGE = env('REPORT_LANG', 'en');
-const LINK = env('REPORT_LINK', '');
+const LINK = env('REPORT_LINK', '').replace(/\/$/, '');
 const MESSAGE = env('REPORT_MESSAGE', 'Claude usage report {date}');
 const STATE_FILE = env('REPORT_STATE_FILE', '/state/reporter.json');
 const ALERTS = process.env.REPORT_ALERTS ?? '80,90,pace,summary,stale,runaway,project';
@@ -169,7 +169,7 @@ async function alertAll(hooks, texts) {
 
 async function checkRunaway(hooks, state, now) {
   const [hot] = await get(['/usage/v1/hot-sessions'], { min_share: String(RUNAWAY_SHARE) });
-  const result = runawaySessions(hot, now, state.runaway);
+  const result = runawaySessions(hot, now, state.runaway, LINK);
   await alertAll(hooks, result.alerts);
   state.runaway = result.state;
 }
@@ -185,7 +185,7 @@ async function checkProjects(hooks, state, members, now) {
     to: new Date(now).toISOString(),
     tz: TIME_ZONE,
   });
-  const result = projectShares(projects, PROJECT_SHARE, window, now, state.projects);
+  const result = projectShares(projects, PROJECT_SHARE, window, now, state.projects, LINK);
   await alertAll(hooks, result.alerts);
   state.projects = result.state;
 }
@@ -202,7 +202,7 @@ async function summary() {
     const day = localNow(weekAgo, TIME_ZONE).day;
     const label = weekAgo.toLocaleDateString('en-GB', { timeZone: TIME_ZONE, weekday: 'short', day: 'numeric' });
     const [before] = await lastDay(['/usage/v1/daily'], 6);
-    const link = LINK ? `${LINK.replace(/\/$/, '')}/dashboard/overview` : '';
+    const link = LINK ? `${LINK}/dashboard/overview` : '';
     return dailySummary(overview.people, projects, Date.now(), lastWeekUsed(overview.people, before, day, label), link);
   } catch (error) {
     log(`numbers left out of the message: ${error.message}`);

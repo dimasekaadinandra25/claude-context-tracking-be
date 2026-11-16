@@ -62,6 +62,7 @@ type IngestResponse struct {
 	LatestAppVersion  string      `json:"latest_app_version,omitempty"`
 	CostPerMillion    float64     `json:"cost_per_million_tokens,omitempty"`
 	PercentPerMillion float64     `json:"percent_per_million_tokens,omitempty"`
+	AccountMembers    int         `json:"account_members,omitempty"`
 }
 
 type Rejection struct {

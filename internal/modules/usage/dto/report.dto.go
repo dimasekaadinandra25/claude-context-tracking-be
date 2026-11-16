@@ -21,6 +21,7 @@ type ReportQuery struct {
 type Caller struct {
 	UserID  string
 	IsAdmin bool
+	ViewAll bool
 }
 
 type PersonSummary struct {

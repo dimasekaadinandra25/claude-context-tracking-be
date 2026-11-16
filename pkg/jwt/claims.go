@@ -7,6 +7,8 @@ import (
 // RoleSuperAdmin is the constant for the super admin role code
 const RoleSuperAdmin = "super_admin"
 
+const RoleUsageViewer = "usage_viewer"
+
 // Claims represents custom JWT claims.
 //
 // Permissions are intentionally NOT embedded here — they are looked up
